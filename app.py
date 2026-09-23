@@ -26,7 +26,12 @@ import urllib.request
 import winreg
 import atexit
 import signal
+import re
+import html
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+# Global reference to main asyncio loop for cross-thread scheduling
+MAIN_LOOP = None
 
 # Ensure Windows stdout supports UTF-8 for clean ASCII QR code and emojis
 try:
@@ -51,42 +56,275 @@ SMART_TV_UA = (
     "(KHTML, like Gecko) SamsungBrowser/4.0 Chrome/108.0.0.0 TV Safari/537.36"
 )
 
-# Standard App Shortcuts & Streaming Services
+# Standard Built-in TV Applications:
+# Only YouTube TV is retained as the default built-in application because MOM TV spoofed
+# the Samsung Tizen Smart TV User-Agent specifically for YouTube's native Cobalt Leanback TV UI.
+# All other websites are custom websites configured via apps.json.
+DEFAULT_APPS = [
+    {
+        "id": "youtube",
+        "name": "YouTube TV",
+        "app": "youtube",
+        "url": "https://www.youtube.com/tv",
+        "poster": "https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?q=80&w=800&auto=format&fit=crop",
+        "icon": "youtube",
+        "category": "Streaming Entertainment",
+        "description": "Watch favorite music, shows, recipe channels, bhajans, and live events in 4K Leanback mode.",
+        "accent": "#FF0000",
+        "glow": "rgba(255, 0, 0, 0.45)",
+    }
+]
+
+CUSTOM_APPS_FILE = os.path.join(BASE_DIR, "apps.json")
+
+# Core System Shortcuts mapping
 APP_SHORTCUTS = {
-    # Video & Streaming Services (Web Apps)
-    "youtube": "https://www.youtube.com/tv",
-    "yt": "https://www.youtube.com/tv",
-    "netflix": "https://www.netflix.com",
-    "hotstar": "https://www.hotstar.com",
-    "prime": "https://www.primevideo.com",
-    "jiocinema": "https://www.jiocinema.com",
-    "zee5": "https://www.zee5.com",
-    "sonyliv": "https://www.sonyliv.com",
-
-    # Media & Curated Channels for Mom
-    "bhajans": "https://www.youtube.com/results?search_query=morning+bhajans+peaceful+aarti",
-    "news": "https://www.youtube.com/results?search_query=dd+news+live",
-
-    # Local Files & Directories
-    "photos": "file:///C:/Users/Public/Pictures",
-
-    # MOM TV Internal Dashboards
     "launcher": TV_URL,
     "home": TV_URL,
     "tv": TV_URL,
+    "youtube": "https://www.youtube.com/tv",
+    "youtubetv": "https://www.youtube.com/tv",
 }
 
-# Load optional user overrides from 'apps.json' if present
-CUSTOM_APPS_FILE = os.path.join(BASE_DIR, "apps.json")
-if os.path.isfile(CUSTOM_APPS_FILE):
+
+def load_all_apps() -> list[dict]:
+    """Load default app (YouTube TV) combined with custom user apps from apps.json."""
+    apps = [dict(a) for a in DEFAULT_APPS]
+    seen_ids = {a["id"].lower() for a in DEFAULT_APPS}
+    seen_urls = {a["url"].rstrip("/").lower() for a in DEFAULT_APPS}
+
+    if os.path.isfile(CUSTOM_APPS_FILE):
+        try:
+            with open(CUSTOM_APPS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and item.get("url"):
+                            item_url = item["url"].rstrip("/").lower()
+                            item_id = (item.get("id") or item.get("app") or "").lower()
+                            if item_id in seen_ids or item_url in seen_urls:
+                                continue
+                            apps.append(item)
+                            if item_id:
+                                seen_ids.add(item_id)
+                            seen_urls.add(item_url)
+                            # Register shortcut
+                            slug = (item.get("app") or item.get("id") or "").lower()
+                            if slug:
+                                APP_SHORTCUTS[slug] = item["url"]
+                            if item.get("name"):
+                                APP_SHORTCUTS[item["name"].lower()] = item["url"]
+                elif isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, str):
+                            v_url = v.rstrip("/").lower()
+                            if k.lower() in seen_ids or v_url in seen_urls:
+                                continue
+                            apps.append({
+                                "id": k,
+                                "name": k.capitalize(),
+                                "app": k,
+                                "url": v,
+                                "poster": "",
+                                "icon": "web",
+                                "category": "Custom",
+                                "description": f"Custom Web App ({v})",
+                                "accent": "#00D4FF",
+                                "glow": "rgba(0, 212, 255, 0.4)",
+                                "custom": True
+                            })
+                            seen_ids.add(k.lower())
+                            seen_urls.add(v_url)
+                            APP_SHORTCUTS[k.lower()] = v
+        except Exception as e:
+            print(f"[-] Error reading apps.json: {e}")
+    return apps
+
+
+def save_custom_app(app_data: dict) -> dict:
+    """Save a user-defined custom website app to apps.json."""
+    raw_url = str(app_data.get("url", "")).strip()
+    if not raw_url:
+        return {"status": "error", "message": "URL is required"}
+    if not (raw_url.startswith("http://") or raw_url.startswith("https://") or raw_url.startswith("file://")):
+        raw_url = "https://" + raw_url
+
+    raw_name = str(app_data.get("name", "")).strip()
+    if not raw_name:
+        parsed_url = urllib.parse.urlparse(raw_url)
+        raw_name = parsed_url.netloc.replace("www.", "").capitalize()
+
+    app_id = str(app_data.get("id") or ("custom_" + str(int(time.time()))))
+    slug = re.sub(r'[^a-zA-Z0-9_]+', '_', raw_name.lower()).strip('_') or app_id
+
+    new_app = {
+        "id": app_id,
+        "name": raw_name,
+        "app": slug,
+        "url": raw_url,
+        "poster": app_data.get("poster") or app_data.get("icon") or "",
+        "icon": app_data.get("icon") or "",
+        "category": app_data.get("category", "Custom Web"),
+        "description": app_data.get("description", f"Web App for {raw_name}"),
+        "accent": app_data.get("accent", "#00D4FF"),
+        "glow": app_data.get("glow", "rgba(0, 212, 255, 0.4)"),
+        "custom": True,
+        "is_custom": True,
+    }
+
+    custom_list = []
+    if os.path.isfile(CUSTOM_APPS_FILE):
+        try:
+            with open(CUSTOM_APPS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    custom_list = [x for x in data if x.get("id") != app_id and x.get("url") != raw_url]
+                elif isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, str):
+                            custom_list.append({"id": k, "name": k.capitalize(), "app": k, "url": v, "custom": True})
+        except Exception:
+            pass
+
+    custom_list.append(new_app)
+    try:
+        with open(CUSTOM_APPS_FILE, "w", encoding="utf-8") as f:
+            json.dump(custom_list, f, indent=2)
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to write apps.json: {e}"}
+
+    APP_SHORTCUTS[slug.lower()] = raw_url
+    APP_SHORTCUTS[raw_name.lower()] = raw_url
+    print(f"✨ [Apps Manager] Saved custom website: {raw_name} ({raw_url})")
+    return {"status": "ok", "app": new_app}
+
+
+def delete_custom_app(app_id: str) -> bool:
+    """Delete a custom app by id or slug."""
+    if not os.path.isfile(CUSTOM_APPS_FILE):
+        return False
     try:
         with open(CUSTOM_APPS_FILE, "r", encoding="utf-8") as f:
-            user_custom_apps = json.load(f)
-            if isinstance(user_custom_apps, dict):
-                APP_SHORTCUTS.update(user_custom_apps)
-                print(f"[*] Loaded {len(user_custom_apps)} custom apps from apps.json")
+            data = json.load(f)
+        if isinstance(data, list):
+            new_list = [x for x in data if x.get("id") != app_id and x.get("app") != app_id]
+            with open(CUSTOM_APPS_FILE, "w", encoding="utf-8") as f:
+                json.dump(new_list, f, indent=2)
+            # Rebuild shortcuts
+            load_all_apps()
+            return True
     except Exception as e:
-        print(f"[-] Warning: Failed to parse apps.json: {e}")
+        print(f"[-] Error deleting app {app_id}: {e}")
+    return False
+
+
+def extract_website_metadata(url: str) -> dict:
+    """Fetch website HTML and auto-extract title, OpenGraph preview image (og:image), and icon."""
+    if not url:
+        return {"status": "error", "message": "URL cannot be empty"}
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = "https://" + url
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    final_url = url
+    content = ""
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            content = resp.read(250000).decode("utf-8", errors="ignore")
+            u = resp.geturl() if hasattr(resp, "geturl") else None
+            if isinstance(u, str) and u:
+                final_url = u
+    except Exception as e:
+        print(f"[-] Notice: Could not fetch URL {url} directly ({e}). Using domain fallbacks.")
+
+    title = ""
+    og_title_m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', content, re.IGNORECASE)
+    if not og_title_m:
+        og_title_m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']', content, re.IGNORECASE)
+    if og_title_m:
+        title = og_title_m.group(1).strip()
+    else:
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", content, re.IGNORECASE | re.DOTALL)
+        if title_m:
+            title = title_m.group(1).strip()
+
+    if not title:
+        parsed = urllib.parse.urlparse(final_url)
+        title = parsed.netloc.replace("www.", "").capitalize()
+
+    # Extract og:image / twitter:image
+    poster = None
+    for p in [
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        r'<meta[^>]+property=["\']og:image:secure_url["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+    ]:
+        m = re.search(p, content, re.IGNORECASE)
+        if m:
+            poster = m.group(1).strip()
+            break
+
+    # Extract icon (apple-touch-icon, icon, shortcut icon)
+    icon = None
+    for p in [
+        r'<link[^>]+rel=["\']apple-touch-icon(?:-precomposed)?["\'][^>]+href=["\']([^"\']+)["\']',
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']apple-touch-icon(?:-precomposed)?["\']',
+        r'<link[^>]+rel=["\']icon["\'][^>]+href=["\']([^"\']+)["\']',
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']icon["\']',
+        r'<link[^>]+rel=["\']shortcut icon["\'][^>]+href=["\']([^"\']+)["\']',
+    ]:
+        m = re.search(p, content, re.IGNORECASE)
+        if m:
+            icon = m.group(1).strip()
+            break
+
+    desc = None
+    desc_m = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', content, re.IGNORECASE)
+    if not desc_m:
+        desc_m = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']', content, re.IGNORECASE)
+    if desc_m:
+        desc = html.unescape(desc_m.group(1).strip())
+
+    title = html.unescape(title) if title else ""
+    if desc:
+        desc = html.unescape(desc)
+
+    if poster:
+        poster = urllib.parse.urljoin(final_url, poster)
+    if icon:
+        icon = urllib.parse.urljoin(final_url, icon)
+    else:
+        parsed = urllib.parse.urlparse(final_url)
+        icon = f"{parsed.scheme}://{parsed.netloc}/favicon.ico"
+
+    if not poster:
+        poster = icon
+
+    return {
+        "status": "ok",
+        "name": title,
+        "title": title,
+        "url": final_url,
+        "poster": poster,
+        "icon": icon,
+        "favicon": icon,
+        "description": desc or f"Browse {title}",
+    }
+
+
+# Initialize all apps
+load_all_apps()
 
 # MIME Types for Static File Serving
 MIME_TYPES = {
@@ -160,7 +398,7 @@ CDP_KEY_MAP = {
     "ok": {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
     "select": {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
     "space": {"key": " ", "code": "Space", "windowsVirtualKeyCode": 32},
-    "back": {"key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8},
+    "back": {"key": "BrowserBack", "code": "BrowserBack", "windowsVirtualKeyCode": 166},
     "rewind": {"key": "ArrowLeft", "code": "ArrowLeft", "windowsVirtualKeyCode": 37},
     "rewind10": {"key": "ArrowLeft", "code": "ArrowLeft", "windowsVirtualKeyCode": 37},
     "replay": {"key": "ArrowLeft", "code": "ArrowLeft", "windowsVirtualKeyCode": 37},
@@ -681,6 +919,49 @@ class CDPControllerBridge:
         await self.send("Runtime.evaluate", {"expression": script_source, "returnByValue": True})
         print("⚡ [CDP Bridge] Evaluated tv-engine.js on current active page")
 
+    def close_secondary_tabs(self, preserve_target_id: str = None) -> int:
+        """Strict Single-Tab Kiosk Enforcement: Close all pages/tabs except the single active one to prevent RAM bloat and laptop slowdown."""
+        targets = self._fetch_targets()
+        pages = [t for t in targets if t.get("type") == "page"]
+        if len(pages) <= 1:
+            return 0
+
+        primary = None
+        if preserve_target_id:
+            for p in pages:
+                if p.get("id") == preserve_target_id:
+                    primary = p
+                    break
+        if not primary and self._active_target:
+            for p in pages:
+                if p.get("id") == self._active_target.get("id"):
+                    primary = p
+                    break
+        if not primary:
+            # Prefer MOM TV page or the first active page
+            for p in pages:
+                if f":{self.http_port}" in p.get("url", ""):
+                    primary = p
+                    break
+            if not primary:
+                primary = pages[0]
+
+        closed = 0
+        for p in pages:
+            pid = p.get("id")
+            if pid and pid != primary.get("id"):
+                try:
+                    url = f"http://127.0.0.1:{self.cdp_port}/json/close/{pid}"
+                    req = urllib.request.Request(url, headers={"User-Agent": "MOM-TV-Bridge/2.0"})
+                    with urllib.request.urlopen(req, timeout=1.0) as resp:
+                        resp.read()
+                    closed += 1
+                except Exception:
+                    pass
+        if closed > 0:
+            print(f"🧹 [CDP Bridge] Closed {closed} secondary tab(s) to strictly maintain 1 TV tab.")
+        return closed
+
     # --------------------------------------------------------------------------
     # HIGH-LEVEL SINGLE-WINDOW NAVIGATION & CONTROL API
     # --------------------------------------------------------------------------
@@ -688,11 +969,15 @@ class CDPControllerBridge:
         """Single-Window In-Place Navigation: Navigate existing kiosk tab without spawning new windows."""
         print(f"🧭 [CDP Bridge] Navigating in-place to: {url}")
         res = await self.send("Page.navigate", {"url": url})
+        # Clean up any secondary tabs that may have opened
+        await asyncio.to_thread(self.close_secondary_tabs)
         return bool(res and "result" in res)
 
     async def home(self) -> bool:
-        """Navigate in-place back to MOM TV Leanback Launcher."""
-        return await self.navigate(f"http://localhost:{self.http_port}/tv")
+        """Navigate in-place back to MOM TV Leanback Launcher and clean up extra tabs."""
+        res = await self.navigate(f"http://localhost:{self.http_port}/tv")
+        await asyncio.to_thread(self.close_secondary_tabs)
+        return res
 
     async def reload(self, ignore_cache: bool = True) -> bool:
         """Reload the active page in-place."""
@@ -709,8 +994,24 @@ class CDPControllerBridge:
 
     async def go_back(self) -> bool:
         """Navigate back via custom tv-engine handler or browser history."""
-        expr = "(window.MomTV && typeof window.MomTV.goBack === 'function') ? window.MomTV.goBack() : window.history.back()"
+        expr = "(window.MomTV && typeof window.MomTV.goBack === 'function') ? window.MomTV.goBack() : (window.history.length > 1 ? (window.history.back(), true) : false)"
         res = await self.evaluate(expr)
+        if not res:
+            # Fallback browser back key dispatch via CDP
+            await self.send("Input.dispatchKeyEvent", {
+                "type": "rawKeyDown",
+                "key": "BrowserBack",
+                "code": "BrowserBack",
+                "windowsVirtualKeyCode": 166,
+                "nativeVirtualKeyCode": 166,
+            }, wait_response=False)
+            await self.send("Input.dispatchKeyEvent", {
+                "type": "keyUp",
+                "key": "BrowserBack",
+                "code": "BrowserBack",
+                "windowsVirtualKeyCode": 166,
+                "nativeVirtualKeyCode": 166,
+            }, wait_response=False)
         return bool(res)
 
     async def dispatch_key(self, key_name: str) -> bool:
@@ -720,6 +1021,9 @@ class CDPControllerBridge:
         2. Dispatches Input.dispatchKeyEvent (rawKeyDown + keyUp) directly into the page DOM.
         """
         k = (key_name or "").lower()
+
+        if k in ("back", "browserback"):
+            return await self.go_back()
 
         # Step 1: Call injected engine handleKey()
         js_call = f"window.MomTV?.handleKey?.({json.dumps(k)})"
@@ -777,13 +1081,28 @@ atexit.register(kiosk_supervisor.stop)
 # BROWSER & APP LAUNCH FALLBACK ENGINE
 # ==============================================================================
 def launch_target(target: str, is_home: bool = False):
-    """Fallback launcher for desktop applications and local files."""
+    """Fallback launcher that prioritizes Kiosk supervisor over unmanaged browser spawns."""
     if not target:
         return
 
     resolved = APP_SHORTCUTS.get(target.lower(), target)
+    if resolved == "photos://modal":
+        return
 
-    # Local file / directory fallback
+    # If Brave Kiosk supervisor is not running, start it cleanly in supervised mode!
+    if not kiosk_supervisor.is_running:
+        print("🛡️ [Launcher] Starting Brave Kiosk Supervisor...")
+        kiosk_supervisor.start()
+        park_cursor()
+        return
+
+    # If Brave Kiosk is active and CDP connected, navigate in-place!
+    if kiosk_supervisor.is_running and cdp_bridge.is_connected and MAIN_LOOP and not MAIN_LOOP.is_closed():
+        asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), MAIN_LOOP)
+        park_cursor()
+        return
+
+    # Local file / directory fallback ONLY if not a web URL
     if not (resolved.startswith("http://") or resolved.startswith("https://")):
         if resolved.startswith("file:///") or os.path.exists(resolved):
             print(f"📂 Opening local target: {resolved}")
@@ -791,29 +1110,9 @@ def launch_target(target: str, is_home: bool = False):
             park_cursor()
             return
 
-    # If Brave Kiosk is active, fallback should delegate to CDP navigate
-    if kiosk_supervisor.is_running and cdp_bridge.is_connected:
-        asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), asyncio.get_event_loop())
-        park_cursor()
-        return
-
-    # Fallback to system browser or executable launch
-    if kiosk_supervisor.browser_path:
-        args = [
-            kiosk_supervisor.browser_path,
-            f"--app={resolved}",
-            "--start-fullscreen",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ]
-        if "youtube.com" in resolved.lower():
-            args.append(f"--user-agent={SMART_TV_UA}")
-        try:
-            subprocess.Popen(args)
-        except Exception:
-            os.startfile(resolved)
-    else:
-        os.startfile(resolved)
+    # Last resort fallback: restart supervised kiosk
+    if not kiosk_supervisor.is_running:
+        kiosk_supervisor.start()
 
     park_cursor()
 
@@ -867,7 +1166,7 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
     def end_headers_with_cors(self, content_type: str):
         self.send_header("Content-Type", content_type)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
@@ -912,11 +1211,100 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.rstrip("/")
+            if not path:
+                path = "/"
+
+            content_len = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_len) if content_len > 0 else b"{}"
+            try:
+                body_json = json.loads(post_data.decode("utf-8")) if post_data else {}
+            except Exception:
+                body_json = {}
+
+            # POST /api/apps or /api/apps/add
+            if path in ("/api/apps", "/api/apps/add"):
+                res = save_custom_app(body_json)
+                notify_apps_updated()
+                status_code = 200 if res.get("status") == "ok" else 400
+                body = json.dumps(res, indent=2).encode("utf-8")
+                self.send_response(status_code)
+                self.end_headers_with_cors("application/json; charset=utf-8")
+                self.wfile.write(body)
+                return
+
+            # POST /api/app/preview
+            if path in ("/api/app/preview", "/api/preview"):
+                target_url = body_json.get("url") or body_json.get("target", "")
+                res = extract_website_metadata(target_url)
+                body = json.dumps(res, indent=2).encode("utf-8")
+                self.send_response(200)
+                self.end_headers_with_cors("application/json; charset=utf-8")
+                self.wfile.write(body)
+                return
+
+            # POST /api/launch
+            if path in ("/api/launch", "/api/open"):
+                target = body_json.get("url") or body_json.get("app") or body_json.get("target", "")
+                resolved = APP_SHORTCUTS.get(target.lower(), target)
+                if not kiosk_supervisor.is_running:
+                    kiosk_supervisor.start()
+
+                global MAIN_LOOP
+                success = False
+                if MAIN_LOOP and MAIN_LOOP.is_running() and cdp_bridge.is_connected:
+                    future = asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), MAIN_LOOP)
+                    try:
+                        success = future.result(timeout=4.0)
+                    except Exception:
+                        success = False
+
+                if not success:
+                    launch_target(resolved)
+                park_cursor()
+
+                res = {"status": "ok", "target": resolved, "method": "cdp" if success else "fallback"}
+                body = json.dumps(res, indent=2).encode("utf-8")
+                self.send_response(200)
+                self.end_headers_with_cors("application/json; charset=utf-8")
+                self.wfile.write(body)
+                return
+
+            # Fallback to _handle_get if not an API POST
             self._handle_get()
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             pass
         except Exception as e:
             print(f"[-] HTTP POST exception: {e}")
+
+    def do_DELETE(self):
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.rstrip("/")
+            app_id = ""
+
+            if path.startswith("/api/apps/"):
+                app_id = path.split("/api/apps/")[1]
+            elif path == "/api/apps":
+                q_params = urllib.parse.parse_qs(parsed.query)
+                app_id = q_params.get("id", [""])[0] or q_params.get("app", [""])[0]
+
+            if app_id:
+                deleted = delete_custom_app(app_id)
+                notify_apps_updated()
+                res = {"status": "ok" if deleted else "not_found", "deleted": deleted, "id": app_id}
+                self.send_response(200 if deleted else 404)
+            else:
+                res = {"status": "error", "message": "Missing app id"}
+                self.send_response(400)
+
+            self.end_headers_with_cors("application/json; charset=utf-8")
+            self.wfile.write(json.dumps(res, indent=2).encode("utf-8"))
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+        except Exception as e:
+            print(f"[-] HTTP DELETE exception: {e}")
 
     def _handle_get(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -1087,6 +1475,26 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # 5e. Apps API (GET all apps)
+        if path == "/api/apps":
+            apps = load_all_apps()
+            body = json.dumps({"status": "ok", "apps": apps}, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.end_headers_with_cors("application/json; charset=utf-8")
+            self.wfile.write(body)
+            return
+
+        # 5f. App Preview API (auto-extract metadata for custom website URL)
+        if path in ("/api/app/preview", "/api/preview"):
+            q_params = urllib.parse.parse_qs(parsed.query)
+            target_url = q_params.get("url", [""])[0]
+            meta = extract_website_metadata(target_url)
+            body = json.dumps(meta, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.end_headers_with_cors("application/json; charset=utf-8")
+            self.wfile.write(body)
+            return
+
         # 6. Static Asset Handling (Icons, SVG, CSS, JS, etc.)
         clean_rel = parsed.path.lstrip("/").replace("\\", "/")
         norm_path = os.path.normpath(os.path.join(BASE_DIR, clean_rel))
@@ -1171,6 +1579,17 @@ async def broadcast_status(data: dict):
     )
 
 
+def notify_apps_updated():
+    """Notify all connected WebSocket clients (TV & remotes) that apps have changed."""
+    global MAIN_LOOP
+    if MAIN_LOOP and MAIN_LOOP.is_running():
+        apps = load_all_apps()
+        asyncio.run_coroutine_threadsafe(
+            broadcast_status({"type": "apps_updated", "apps": apps}),
+            MAIN_LOOP,
+        )
+
+
 async def handle_websocket_message(data: dict, ws=None) -> dict:
     """Process incoming command packet from phone remote or automation client."""
     cmd = data.get("cmd", "").lower()
@@ -1180,6 +1599,9 @@ async def handle_websocket_message(data: dict, ws=None) -> dict:
     # 1. LAUNCH APP / URL (Single-Window CDP Navigation)
     # ------------------------------------------------------------------
     if cmd == "launch":
+        if not kiosk_supervisor.is_running:
+            kiosk_supervisor.start()
+
         target = data.get("url") or data.get("app") or data.get("target", "")
         resolved = APP_SHORTCUTS.get(target.lower(), target)
 
@@ -1207,12 +1629,33 @@ async def handle_websocket_message(data: dict, ws=None) -> dict:
     # 2. HOME / LAUNCHER (In-place CDP Navigation)
     # ------------------------------------------------------------------
     elif cmd == "home":
+        if not kiosk_supervisor.is_running:
+            kiosk_supervisor.start()
+
         success = await cdp_bridge.home()
         if not success:
             launch_target(TV_URL, is_home=True)
         park_cursor()
         response["action"] = "home"
         response["method"] = "cdp_navigate" if success else "fallback_home"
+
+    # ------------------------------------------------------------------
+    # 2b. DYNAMIC APPS MANAGEMENT (WebSocket)
+    # ------------------------------------------------------------------
+    elif cmd == "get_apps":
+        response["apps"] = load_all_apps()
+
+    elif cmd == "add_app":
+        app_dict = data.get("app") or data
+        saved = save_custom_app(app_dict)
+        notify_apps_updated()
+        response["result"] = saved
+
+    elif cmd == "delete_app":
+        app_id = data.get("id") or data.get("app_id", "")
+        deleted = delete_custom_app(app_id)
+        notify_apps_updated()
+        response["deleted"] = deleted
 
     # ------------------------------------------------------------------
     # 3. KEY INPUT (Dual-Layer: CDP DOM/Engine + Hardware Win32 Fallback)
@@ -1533,6 +1976,9 @@ def print_startup_banner():
 # MAIN ENTRY POINT & LIFECYCLE SUPERVISOR
 # ==============================================================================
 async def main():
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
+
     # 1. Start HTTP Server in background daemon thread
     http_thread = threading.Thread(target=start_http_server, name="HTTPServerThread", daemon=True)
     http_thread.start()

@@ -72,6 +72,7 @@
       font-family: var(--font-stack);
       overflow-x: hidden;
       overflow-y: auto;
+      overscroll-behavior: none;
       display: flex;
       justify-content: center;
       align-items: stretch;
@@ -1736,72 +1737,8 @@
 
     <!-- 2. QUICK APPS SHELF -->
     <div class="shelf-container">
-      <div class="apps-shelf">
-        <!-- YouTube -->
-        <div class="app-pill pill-yt" onclick="launchApp('youtube')">
-          <svg viewBox="0 0 24 24" fill="#FF0000">
-            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-          </svg>
-          YouTube
-        </div>
-
-        <!-- Hotstar -->
-        <div class="app-pill pill-hotstar" onclick="launchApp('hotstar')">
-          <svg viewBox="0 0 24 24" fill="#4285F4">
-            <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
-          </svg>
-          Hotstar
-        </div>
-
-        <!-- Netflix -->
-        <div class="app-pill pill-netflix" onclick="launchApp('netflix')">
-          <svg viewBox="0 0 24 24" fill="#E50914">
-            <path d="M5.398 0v.006c3.028 8.556 5.37 15.175 8.348 23.596 2.344.058 4.85.398 4.85.398V0h-4.85v15.309L8.892 0H5.398z"/>
-          </svg>
-          Netflix
-        </div>
-
-        <!-- Prime Video -->
-        <div class="app-pill pill-prime" onclick="launchApp('prime')">
-          <svg viewBox="0 0 24 24" fill="#00A8E1">
-            <path d="M18.8 15.5c-3.7 2.8-9 4.3-13.6 4.3-1.6 0-3.1-.2-4.6-.6-.4-.1-.5-.5-.2-.7 2.1-1.3 4.6-2.1 7.2-2.1 4.1 0 8.1 1.7 11.2 4.1.3.2.1.8-.3.7l.3-5.7z"/>
-            <path d="M21.2 18.2c-.3-.4-1.9-.9-4.2-.7-.4 0-.5-.3-.1-.6 2.5-1.9 6.7-.7 7 1 .2 1.4-1.8 5.7-4.4 7.5-.3.2-.6.1-.5-.3.8-2 2.5-6.5 2.2-6.9z"/>
-          </svg>
-          Prime
-        </div>
-
-        <!-- JioCinema -->
-        <div class="app-pill pill-jio" onclick="launchApp('jiocinema')">
-          <svg viewBox="0 0 24 24" fill="#E5007D">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="#E5007D" stroke-width="2.5"/>
-            <path d="M10 8l6 4-6 4V8z"/>
-          </svg>
-          JioCinema
-        </div>
-
-        <!-- Bhajans -->
-        <div class="app-pill pill-bhajans" onclick="launchApp('bhajans')">
-          <svg viewBox="0 0 24 24" fill="#FF8C00">
-            <path d="M12 2C10.5 5 8 7.5 8 11c0 2.2 1.8 4 4 4s4-1.8 4-4c0-3.5-2.5-6-4-9zm0 15c-3.3 0-6 2.7-6 6h12c0-3.3-2.7-6-6-6z"/>
-          </svg>
-          Bhajans
-        </div>
-
-        <!-- Photos -->
-        <div class="app-pill pill-photos" onclick="launchApp('photos')">
-          <svg viewBox="0 0 24 24" fill="#00B4D8">
-            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-          </svg>
-          Photos
-        </div>
-
-        <!-- News -->
-        <div class="app-pill pill-news" onclick="launchApp('news')">
-          <svg viewBox="0 0 24 24" fill="#0077B6">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
-          </svg>
-          News
-        </div>
+      <div class="apps-shelf" id="remote-apps-shelf">
+        <!-- Dynamically populated exclusively with user custom websites from apps.json -->
       </div>
     </div>
 
@@ -2288,32 +2225,68 @@
        ========================================================================== -->
   <script>
     /* --------------------------------------------------------------------------
-       1. HAPTIC FEEDBACK ENGINE
+       1. HAPTIC FEEDBACK ENGINE (ANDROID VIBRATE + IOS SYNTHETIC CLICK IMPULSE)
        -------------------------------------------------------------------------- */
-    function haptic(type) {
-      if (!('vibrate' in navigator)) return;
+    let iosAudioCtx = null;
+    function playSyntheticClickImpulse(frequency = 160, durationMs = 12) {
       try {
-        switch (type) {
-          case 'click':
-            navigator.vibrate(16);
-            break;
-          case 'light':
-            navigator.vibrate(12);
-            break;
-          case 'medium':
-            navigator.vibrate(18);
-            break;
-          case 'firm':
-            navigator.vibrate(25);
-            break;
-          case 'double':
-            navigator.vibrate([12, 35, 12]);
-            break;
-          case 'long':
-            navigator.vibrate(45);
-            break;
+        if (!iosAudioCtx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) iosAudioCtx = new AC();
         }
-      } catch (err) {}
+        if (iosAudioCtx && iosAudioCtx.state === 'suspended') {
+          iosAudioCtx.resume().catch(() => {});
+        }
+        if (!iosAudioCtx) return;
+        const t = iosAudioCtx.currentTime;
+        const osc = iosAudioCtx.createOscillator();
+        const gain = iosAudioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(frequency, t);
+        osc.frequency.exponentialRampToValueAtTime(40, t + durationMs / 1000);
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + durationMs / 1000);
+        osc.connect(gain);
+        gain.connect(iosAudioCtx.destination);
+        osc.start(t);
+        osc.stop(t + durationMs / 1000 + 0.005);
+      } catch (_) {}
+    }
+
+    function haptic(type) {
+      let didVibrate = false;
+      if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
+        try {
+          switch (type) {
+            case 'click':
+            case 'light':
+              didVibrate = navigator.vibrate(14);
+              break;
+            case 'medium':
+              didVibrate = navigator.vibrate(18);
+              break;
+            case 'firm':
+              didVibrate = navigator.vibrate(26);
+              break;
+            case 'double':
+              didVibrate = navigator.vibrate([12, 35, 12]);
+              break;
+            case 'long':
+              didVibrate = navigator.vibrate(45);
+              break;
+          }
+        } catch (_) {}
+      }
+      // If iOS WebKit or vibration not triggered, deliver tactile synthetic mechanical click
+      if (!didVibrate) {
+        if (type === 'firm' || type === 'double') {
+          playSyntheticClickImpulse(220, 16);
+        } else if (type === 'long') {
+          playSyntheticClickImpulse(140, 24);
+        } else {
+          playSyntheticClickImpulse(180, 10);
+        }
+      }
     }
 
     /* --------------------------------------------------------------------------
@@ -2365,6 +2338,9 @@
           // Start heartbeat ping
           pingInterval = setInterval(sendPing, 4000);
           sendPing();
+
+          // Sync apps dynamically from server
+          fetchRemoteApps();
         };
 
         ws.onmessage = (event) => {
@@ -2373,6 +2349,9 @@
             if (data.pong && lastPingTimestamp > 0) {
               const rtt = Date.now() - lastPingTimestamp;
               latencyPill.textContent = `${rtt}ms`;
+            }
+            if (data.type === 'apps_updated') {
+              fetchRemoteApps();
             }
           } catch (e) {}
         };
@@ -2410,6 +2389,68 @@
         lastPingTimestamp = Date.now();
         ws.send(JSON.stringify({ cmd: 'ping', ts: lastPingTimestamp }));
       }
+    }
+
+    /* --------------------------------------------------------------------------
+       DYNAMIC APP SHELF SYNCHRONIZATION
+       -------------------------------------------------------------------------- */
+    async function fetchRemoteApps() {
+      try {
+        const res = await fetch('/api/apps');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.apps)) {
+            renderRemoteApps(data.apps);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch apps for remote:', e);
+      }
+      renderRemoteApps([]);
+    }
+
+    function renderRemoteApps(appsList) {
+      const shelf = document.getElementById('remote-apps-shelf');
+      if (!shelf) return;
+
+      shelf.innerHTML = '';
+      if (!appsList || appsList.length === 0) {
+        shelf.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:6px 12px;white-space:nowrap;display:flex;align-items:center;gap:6px;"><span>✨ Add custom channels on your TV to quick-launch here</span></div>';
+        return;
+      }
+      appsList.forEach(app => {
+        const pill = document.createElement('div');
+        const appId = app.id || app.app || 'app';
+        pill.className = `app-pill pill-${appId}`;
+        pill.onclick = () => launchApp(app.url || appId, app.name || appId);
+
+        let iconHtml = '';
+        if (appId === 'youtube') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#FF0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
+        } else if (appId === 'hotstar') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#4285F4"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`;
+        } else if (appId === 'netflix') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#E50914"><path d="M5.398 0v.006c3.028 8.556 5.37 15.175 8.348 23.596 2.344.058 4.85.398 4.85.398V0h-4.85v15.309L8.892 0H5.398z"/></svg>`;
+        } else if (appId === 'prime') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#00A8E1"><path d="M18.8 15.5c-3.7 2.8-9 4.3-13.6 4.3-1.6 0-3.1-.2-4.6-.6-.4-.1-.5-.5-.2-.7 2.1-1.3 4.6-2.1 7.2-2.1 4.1 0 8.1 1.7 11.2 4.1.3.2.1.8-.3.7l.3-5.7z"/><path d="M21.2 18.2c-.3-.4-1.9-.9-4.2-.7-.4 0-.5-.3-.1-.6 2.5-1.9 6.7-.7 7 1 .2 1.4-1.8 5.7-4.4 7.5-.3.2-.6.1-.5-.3.8-2 2.5-6.5 2.2-6.9z"/></svg>`;
+        } else if (appId === 'jiocinema') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#E5007D"><circle cx="12" cy="12" r="10" fill="none" stroke="#E5007D" stroke-width="2.5"/><path d="M10 8l6 4-6 4V8z"/></svg>`;
+        } else if (appId === 'bhajans') {
+          iconHtml = `<span style="font-size:16px;line-height:1;">🪔</span>`;
+        } else if (appId === 'photos') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#00B4D8"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>`;
+        } else if (appId === 'news') {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="#0077B6"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>`;
+        } else if (app.icon && (app.icon.startsWith('http://') || app.icon.startsWith('https://'))) {
+          iconHtml = `<img src="${app.icon}" alt="" style="width:16px;height:16px;border-radius:4px;object-fit:cover;" onerror="this.outerHTML='<span style=\\'font-size:16px;\\'>🌐</span>'" />`;
+        } else {
+          iconHtml = `<span style="font-size:16px;line-height:1;">🌐</span>`;
+        }
+
+        pill.innerHTML = `${iconHtml}<span>${app.name || 'App'}</span>`;
+        shelf.appendChild(pill);
+      });
     }
 
     /* --------------------------------------------------------------------------
@@ -2451,35 +2492,81 @@
       send({ cmd: 'volume', action: action });
     }
 
-    function launchApp(appName) {
+    function launchApp(target, displayName) {
       haptic('medium');
-      send({ cmd: 'launch', app: appName });
-      showToast(`Launching ${appName.charAt(0).toUpperCase() + appName.slice(1)}...`, true);
+      send({ cmd: 'launch', app: target, url: target });
+      const name = displayName || target;
+      showToast(`Launching ${name.charAt(0).toUpperCase() + name.slice(1)}...`, true);
     }
 
     /* --------------------------------------------------------------------------
-       4. D-PAD DIRECT TOUCH OPTIMIZATION (CRISP DISCRETE TAPS, NO SWIPE CONFLICTS)
+       4. D-PAD 360° RADIAL HIT-TESTING ENGINE (ZERO DEAD ZONES & ZERO DELAY)
        -------------------------------------------------------------------------- */
-    // Attach touchstart listeners to D-pad buttons to fire immediately on touch
-    // and prevent synthetic delayed clicks and double-triggering.
+    const dpadPlate = document.getElementById('dpad-plate');
+
+    function resolveDpadKeyFromTouch(touch, plateRect) {
+      const cx = plateRect.left + plateRect.width / 2;
+      const cy = plateRect.top + plateRect.height / 2;
+      const dx = touch.clientX - cx;
+      const dy = touch.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+
+      // Center OK circle: approx 22% of dpad plate width
+      if (dist <= plateRect.width * 0.22) {
+        return 'ok';
+      }
+
+      // 360-degree angle resolution: eliminates diagonal dead zones completely
+      const deg = Math.atan2(dy, dx) * (180 / Math.PI);
+      if (deg >= -45 && deg < 45) return 'right';
+      if (deg >= 45 && deg < 135) return 'down';
+      if (deg >= -135 && deg < -45) return 'up';
+      return 'left';
+    }
+
+    function setDpadActiveVisual(key) {
+      document.querySelectorAll('.dpad-btn, .dpad-center-ok').forEach(el => el.classList.remove('active'));
+      if (!key) return;
+      if (key === 'ok') {
+        const okEl = document.querySelector('.dpad-center-ok');
+        if (okEl) okEl.classList.add('active');
+      } else {
+        const btn = document.querySelector(`.dpad-btn.${key}`);
+        if (btn) btn.classList.add('active');
+      }
+    }
+
+    if (dpadPlate) {
+      dpadPlate.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (e.touches.length > 0) {
+          const rect = dpadPlate.getBoundingClientRect();
+          const key = resolveDpadKeyFromTouch(e.touches[0], rect);
+          setDpadActiveVisual(key);
+          sendKey(key);
+        }
+      }, { passive: false });
+
+      window.addEventListener('touchend', () => {
+        setDpadActiveVisual(null);
+      });
+
+      window.addEventListener('touchcancel', () => {
+        setDpadActiveVisual(null);
+      });
+    }
+
+    // Direct fallback for discrete touch & mouse clicks in browser debugging
     document.querySelectorAll('.dpad-btn, .dpad-center-ok').forEach((btn) => {
       btn.addEventListener('touchstart', (e) => {
-        e.preventDefault(); // Prevents synthetic click & emulated mouse events
-        btn.classList.add('active');
+        e.preventDefault();
+      });
+      btn.addEventListener('click', (e) => {
         const key = btn.dataset.key || (btn.classList.contains('up') ? 'up' :
                      btn.classList.contains('down') ? 'down' :
                      btn.classList.contains('left') ? 'left' :
                      btn.classList.contains('right') ? 'right' : 'ok');
         sendKey(key);
-      }, { passive: false });
-
-      btn.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        btn.classList.remove('active');
-      }, { passive: false });
-
-      btn.addEventListener('touchcancel', () => {
-        btn.classList.remove('active');
       });
     });
 
@@ -2663,18 +2750,22 @@
         };
 
         recognition.onresult = (event) => {
-          let transcript = '';
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            transcript += event.results[i][0].transcript;
+          let fullTranscript = '';
+          let isFinal = false;
+          for (let i = 0; i < event.results.length; ++i) {
+            fullTranscript += event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              isFinal = true;
+            }
           }
           if (input) {
-            input.value = transcript;
-            handleHubInput(transcript);
+            input.value = fullTranscript;
+            handleHubInput(fullTranscript);
           }
 
-          if (event.results[0] && event.results[0].isFinal) {
+          if (isFinal) {
             haptic('firm');
-            if (statusEl) statusEl.textContent = `Heard: "${transcript}" — Tap destination below`;
+            if (statusEl) statusEl.textContent = `Heard: "${fullTranscript}" — Tap destination below`;
             stopVoiceListening();
           }
         };
@@ -3060,6 +3151,23 @@
         switchMode('trackpad');
       }
     } catch (_) {}
+
+    // Screen Wake Lock (keep remote screen active while watching TV)
+    let screenWakeLock = null;
+    async function requestScreenWakeLock() {
+      try {
+        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+          screenWakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (_) {}
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        requestScreenWakeLock();
+      }
+    });
+    window.addEventListener('load', requestScreenWakeLock);
+    document.addEventListener('touchstart', requestScreenWakeLock, { once: true });
 
     // Initialize WebSocket on startup
     initWebSocket();

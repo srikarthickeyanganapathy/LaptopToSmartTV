@@ -1333,132 +1333,155 @@ html[data-momtv-zoom="135"] {
   }
 
   /* ==========================================================================
-     6. SYNTHETIC HOVER & COORDINATE CLICK EMULATION
+     6. DIRECT COMPONENT ACTION DISPATCH & TRUSTED EXECUTION
      ========================================================================== */
-  function emulateMouseHover(el) {
-    if (!el || typeof el.getBoundingClientRect !== 'function') return;
-    try {
-      const rect = el.getBoundingClientRect();
-      const clientX = Math.round(rect.left + rect.width / 2);
-      const clientY = Math.round(rect.top + rect.height / 2);
+  function findActionTarget(el) {
+    if (!el) return null;
 
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX,
-        clientY,
-        buttons: 0,
-        pointerId: 1,
-        pointerType: 'mouse',
-        isPrimary: true
-      };
-
-      el.dispatchEvent(new PointerEvent('pointerover', eventInit));
-      el.dispatchEvent(new PointerEvent('pointerenter', eventInit));
-      el.dispatchEvent(new MouseEvent('mouseenter', eventInit));
-      el.dispatchEvent(new MouseEvent('mousemove', eventInit));
-    } catch (err) {
-      console.warn('[MOM TV] Error in hover emulation:', err);
+    // 1. Direct anchor with valid href
+    if (el.tagName === 'A' && (el.href || el.getAttribute('href'))) {
+      return el;
     }
+
+    // 2. Child anchor with valid href
+    if (el.querySelectorAll) {
+      const allAnchors = Array.from(el.querySelectorAll('a'));
+      const validAnchor = allAnchors.find(a => {
+        const h = a.href || a.getAttribute('href');
+        return h && !h.startsWith('javascript:') && !h.startsWith('#');
+      });
+      if (validAnchor) return validAnchor;
+    }
+
+    // 3. Parent or ancestor anchor
+    if (el.closest) {
+      const parentA = el.closest('a[href]');
+      if (parentA) return parentA;
+    }
+
+    // 4. Primary button or role="button"
+    if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') {
+      return el;
+    }
+    if (el.querySelector) {
+      const innerBtn = el.querySelector('button, [role="button"]');
+      if (innerBtn && !innerBtn.hasAttribute('disabled')) return innerBtn;
+    }
+
+    // 5. Input or searchbox
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.getAttribute('role') === 'searchbox') {
+      return el;
+    }
+
+    return el;
   }
 
-  function emulateMouseLeave(el) {
-    if (!el || typeof el.getBoundingClientRect !== 'function') return;
-    try {
-      const rect = el.getBoundingClientRect();
-      const clientX = Math.round(rect.left + rect.width / 2);
-      const clientY = Math.round(rect.top + rect.height / 2);
-
-      const leaveInit = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX,
-        clientY,
-        buttons: 0,
-        pointerId: 1,
-        pointerType: 'mouse',
-        isPrimary: true
-      };
-
-      el.dispatchEvent(new PointerEvent('pointerout', leaveInit));
-      el.dispatchEvent(new PointerEvent('pointerleave', leaveInit));
-      el.dispatchEvent(new MouseEvent('mouseleave', leaveInit));
-    } catch (_) {}
-  }
-
-  function emulateCoordinateClick(el) {
+  function executeCardAction(el) {
     if (!el) return false;
+    const target = findActionTarget(el) || el._momTvActionTarget || el;
 
-    if (isSearchInput(el) || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-      try { el.focus(); } catch (_) {}
+    if (isSearchInput(target) || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      try { target.focus(); } catch (_) {}
       return true;
     }
 
     try {
-      const rect = el.getBoundingClientRect();
+      const rect = target.getBoundingClientRect();
       const clientX = Math.round(rect.left + rect.width / 2);
       const clientY = Math.round(rect.top + rect.height / 2);
 
-      const downInit = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX,
-        clientY,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: 'mouse',
-        isPrimary: true
-      };
+      // Dispatch full physical event sequence
+      const pointerDown = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true });
+      const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1 });
+      const pointerUp = new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true });
+      const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 0 });
+      const clickEvt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0 });
 
-      const upInit = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX,
-        clientY,
-        button: 0,
-        buttons: 0,
-        pointerId: 1,
-        pointerType: 'mouse',
-        isPrimary: true
-      };
+      target.dispatchEvent(pointerDown);
+      target.dispatchEvent(mouseDown);
+      target.dispatchEvent(pointerUp);
+      target.dispatchEvent(mouseUp);
+      target.dispatchEvent(clickEvt);
 
-      // 1. Dispatch full physical mouse sequence
-      el.dispatchEvent(new PointerEvent('pointerdown', downInit));
-      el.dispatchEvent(new MouseEvent('mousedown', downInit));
-      el.dispatchEvent(new PointerEvent('pointerup', upInit));
-      el.dispatchEvent(new MouseEvent('mouseup', upInit));
-      el.dispatchEvent(new MouseEvent('click', upInit));
+      // If outer card container is distinct, also dispatch physical sequence and invoke .click() on container
+      if (el !== target) {
+        try {
+          el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1 }));
+          el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+          el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 0 }));
+          el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0 }));
+          el.click();
+        } catch (_) {}
+      }
 
-      // 2. Call .click() on element
+      // Call .click() directly on the target
       try {
-        el.click();
+        target.click();
       } catch (_) {}
 
-      // 3. Trigger inner play button or anchor if present
-      const innerTarget = el.querySelector(
-        '.play-button, [class*="play-btn" i], [class*="playButton" i], [data-testid*="play" i], [aria-label*="Play" i], button, a[href], [role="button"]'
-      );
-      if (innerTarget && innerTarget !== el) {
+      // If target has a real navigation href, provide instant direct navigation fallback
+      const rawHref = target.href || target.getAttribute('href');
+      if (rawHref && !rawHref.startsWith('javascript:') && !rawHref.startsWith('#')) {
         try {
-          innerTarget.click();
+          const resolvedUrl = new URL(rawHref, window.location.href).href;
+          setTimeout(() => {
+            if (window.location.href !== resolvedUrl) {
+              window.location.href = resolvedUrl;
+            }
+          }, 120);
         } catch (_) {}
       }
 
       return true;
     } catch (err) {
-      console.warn('[MOM TV] Error in coordinate click:', err);
-      try { el.click(); } catch (_) {}
+      console.warn('[MOM TV] Error executing card action:', err);
+      try { target.click(); } catch (_) {}
       return true;
     }
   }
 
+  // Deprecated compatibility wrappers
+  function emulateCoordinateClick(el) {
+    return executeCardAction(el);
+  }
+
+  function emulateMouseHover(el) {
+    if (!el || !el.getBoundingClientRect) return;
+    try {
+      const rect = el.getBoundingClientRect();
+      const clientX = Math.round(rect.left + rect.width / 2);
+      const clientY = Math.round(rect.top + rect.height / 2);
+      const init = { bubbles: true, cancelable: true, view: window, clientX, clientY, buttons: 0 };
+      if (typeof PointerEvent !== 'undefined') {
+        el.dispatchEvent(new PointerEvent('pointerover', { ...init, pointerType: 'mouse', isPrimary: true }));
+        el.dispatchEvent(new PointerEvent('pointerenter', { ...init, pointerType: 'mouse', isPrimary: true }));
+      }
+      if (typeof MouseEvent !== 'undefined') {
+        el.dispatchEvent(new MouseEvent('mouseenter', init));
+        el.dispatchEvent(new MouseEvent('mousemove', init));
+      }
+    } catch (_) {}
+  }
+
+  function emulateMouseLeave(el) {
+    if (!el || !el.getBoundingClientRect) return;
+    try {
+      const rect = el.getBoundingClientRect();
+      const clientX = Math.round(rect.left + rect.width / 2);
+      const clientY = Math.round(rect.top + rect.height / 2);
+      const init = { bubbles: true, cancelable: true, view: window, clientX, clientY, buttons: 0 };
+      if (typeof PointerEvent !== 'undefined') {
+        el.dispatchEvent(new PointerEvent('pointerleave', { ...init, pointerType: 'mouse', isPrimary: true }));
+      }
+      if (typeof MouseEvent !== 'undefined') {
+        el.dispatchEvent(new MouseEvent('mouseleave', init));
+      }
+    } catch (_) {}
+  }
+
   /* ==========================================================================
-     7. STRICT CARD-ONLY FILTERING & DISCOVERY
+     7. STRUCTURAL CARD-ONLY FILTERING & DISCOVERY
      ========================================================================== */
   function isVisible(el) {
     if (!el || !el.getBoundingClientRect) return false;
@@ -1548,73 +1571,68 @@ html[data-momtv-zoom="135"] {
     const tag = el.tagName.toLowerCase();
     if (tag === 'button' || el.getAttribute('role') === 'button') {
       const rect = el.getBoundingClientRect();
-      return rect.width >= 55 && rect.height >= 26;
+      return rect.width >= 50 && rect.height >= 24;
     }
     return false;
   }
 
   function getFocusableCards() {
     const CARD_SELECTORS = [
-      // TestID & Data Selectors
-      '[data-testid*="card" i]',
+      // Semantic card elements
+      'article',
+      '[role="article"]',
+
+      // Data attributes & testids on streaming platforms (Hotstar, Prime, Netflix, JioCinema, Zee5)
       '[data-testid*="tray" i]',
+      '[data-testid*="card" i]',
       '[data-testid*="item" i]',
       '[data-testid*="title" i]',
       '[data-testid*="poster" i]',
+      '[data-testid*="thumb" i]',
+      '[data-uia*="card" i]',
       '[data-card]',
 
-      // Common Streaming Card/Poster Containers
-      'div[class*="card" i]',
+      // Class patterns for movie/show card containers
+      'div[class*="card" i]:not([class*="card-list" i]):not([class*="cards-grid" i])',
       'div[class*="poster" i]',
-      'div[class*="tray" i]',
-      'div[class*="slider" i]',
-      'div[class*="thumb" i]',
+      'div[class*="tray-item" i]',
+      'div[class*="slider-item" i]',
       'div[class*="tile" i]',
-
-      // Netflix Specific Selectors
-      'div[class*="title-card" i]',
+      'div[class*="thumb" i]',
       '.title-card',
       '.slider-item',
-
-      // Hotstar / JioCinema / Prime Specific Selectors
-      'div[class*="tray-item" i]',
-      'div[class*="card-container" i]',
       '.app-card',
       '.video-card',
       '.movie-card',
       '.media-card',
       '.show-card',
 
-      // Streaming Media Navigation Links
+      // Streaming media navigation links
+      'a[href*="/watch"]',
+      'a[href*="/title/"]',
       'a[href*="/movies/"]',
       'a[href*="/shows/"]',
-      'a[href*="/watch/"]',
-      'a[href*="/watch?"]',
-      'a[href*="/title/"]',
+      'a[href*="/series/"]',
       'a[href*="/play/"]',
       'a[href*="/video/"]',
-      'a[href*="/series/"]',
-      'a[href]',
+      'a[href*="/detail/"]',
 
-      // Interactive Action Elements & Controls
-      'button:not([disabled])',
-      '[role="button"]',
-      '[role="link"]',
-      'input:not([type="hidden"])',
-      '[tabindex="0"]',
-
-      // YouTube Items
+      // YouTube web items
       'ytd-rich-item-renderer',
       'ytd-video-renderer',
       'ytd-grid-video-renderer',
       'ytd-compact-video-renderer',
       'ytd-reel-item-renderer',
       'ytd-playlist-renderer',
-      'ytd-thumbnail'
+      'ytd-thumbnail',
+
+      // Standalone primary buttons outside header nav
+      'button:not([disabled])',
+      '[role="button"]'
     ];
 
     const rawElements = Array.from(document.querySelectorAll(CARD_SELECTORS.join(',')));
-    const validCards = [];
+    const candidates = [];
 
     for (const el of rawElements) {
       if (isJunkElement(el)) continue;
@@ -1622,32 +1640,45 @@ html[data-momtv-zoom="135"] {
       if (!isVisible(el)) continue;
 
       const rect = el.getBoundingClientRect();
-      const isCardGeom = rect.width >= 85 && rect.height >= 48;
-      const isButtonGeom = isPrimaryActionButton(el) && rect.width >= 55 && rect.height >= 26;
+      const isCardGeom = rect.width >= 75 && rect.height >= 40;
+      const isBtnGeom = isPrimaryActionButton(el) && rect.width >= 50 && rect.height >= 24;
 
-      if (!isCardGeom && !isButtonGeom) continue;
+      if (!isCardGeom && !isBtnGeom) continue;
 
-      validCards.push(el);
+      candidates.push(el);
     }
 
-    // Deduplicate: If an outer container wraps an inner card, keep the most relevant
+    // Smart Deduplication:
+    // If elements are nested inside each other, keep the full visual card box and bind the primary action target
     const uniqueCards = [];
-    for (let i = 0; i < validCards.length; i++) {
-      const c1 = validCards[i];
-      let isChildOfAnother = false;
-      for (let j = 0; j < validCards.length; j++) {
-        if (i !== j && validCards[j].contains(c1)) {
-          const pTag = validCards[j].tagName.toLowerCase();
-          const cTag = c1.tagName.toLowerCase();
-          if (pTag === 'div' && (cTag === 'a' || cTag === 'button')) {
-            // Keep child link/button
-          } else {
-            isChildOfAnother = true;
-            break;
+    for (let i = 0; i < candidates.length; i++) {
+      const c1 = candidates[i];
+      let dominatedByOther = false;
+
+      for (let j = 0; j < candidates.length; j++) {
+        if (i === j) continue;
+        const c2 = candidates[j];
+
+        if (c2.contains(c1)) {
+          const r2 = c2.getBoundingClientRect();
+          const r1 = c1.getBoundingClientRect();
+
+          // If c2 is a broad row holding multiple items horizontally, c1 is the real individual card!
+          if (r2.width > r1.width * 1.8) {
+            continue;
           }
+
+          // Otherwise c2 is the card container wrapping c1
+          c2._momTvActionTarget = findActionTarget(c1) || c1;
+          dominatedByOther = true;
+          break;
         }
       }
-      if (!isChildOfAnother && !uniqueCards.includes(c1)) {
+
+      if (!dominatedByOther && !uniqueCards.includes(c1)) {
+        if (!c1._momTvActionTarget) {
+          c1._momTvActionTarget = findActionTarget(c1) || c1;
+        }
         uniqueCards.push(c1);
       }
     }
@@ -1770,6 +1801,74 @@ html[data-momtv-zoom="135"] {
     return rows;
   }
 
+  function findVerticalScrollContainer(el) {
+    let node = el ? el.parentElement : null;
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (node.scrollHeight > node.clientHeight + 40) {
+        const style = window.getComputedStyle(node);
+        const oy = style.overflowY;
+        if (oy === 'auto' || oy === 'scroll') {
+          return node;
+        }
+      }
+      node = node.parentElement;
+    }
+    return window;
+  }
+
+  function tryPaginateCarousel(cardEl, direction) {
+    if (!cardEl) return false;
+    let node = cardEl.parentElement;
+    while (node && node !== document.body && node !== document.documentElement) {
+      const chevronSelector = direction === 'right'
+        ? [
+            'button[aria-label*="next" i]',
+            'button[aria-label*="right" i]',
+            'button[aria-label*="forward" i]',
+            '[class*="chevron-right" i]',
+            '[class*="arrow-right" i]',
+            '[class*="next-button" i]',
+            '[class*="slider-right" i]',
+            '[data-testid*="next" i]',
+            '[data-uia*="next" i]',
+            '.next-btn',
+            '.slider-button-next'
+          ].join(',')
+        : [
+            'button[aria-label*="prev" i]',
+            'button[aria-label*="previous" i]',
+            'button[aria-label*="left" i]',
+            '[class*="chevron-left" i]',
+            '[class*="arrow-left" i]',
+            '[class*="prev-button" i]',
+            '[class*="slider-left" i]',
+            '[data-testid*="prev" i]',
+            '[data-uia*="prev" i]',
+            '.prev-btn',
+            '.slider-button-prev'
+          ].join(',');
+
+      const btn = node.querySelector(chevronSelector);
+      if (btn && isVisible(btn)) {
+        btn.click();
+        return true;
+      }
+
+      if (node.scrollWidth > node.clientWidth + 30) {
+        const style = window.getComputedStyle(node);
+        const ox = style.overflowX;
+        if (ox === 'auto' || ox === 'scroll' || ox === 'hidden') {
+          const delta = Math.round(node.clientWidth * 0.75) * (direction === 'right' ? 1 : -1);
+          node.scrollBy({ left: delta, behavior: 'smooth' });
+          return true;
+        }
+      }
+
+      node = node.parentElement;
+    }
+    return false;
+  }
+
   /**
    * Auto-Scroll to Center: Smoothly scrolls the focused card into vertical ~40%
    */
@@ -1781,17 +1880,20 @@ html[data-momtv-zoom="135"] {
     const targetY = window.innerHeight * 0.40;
     const diffY = (rect.top + rect.height / 2) - targetY;
 
-    if (Math.abs(diffY) > 20) {
+    const scrollContainer = findVerticalScrollContainer(el);
+    if (scrollContainer && scrollContainer !== window) {
+      scrollContainer.scrollBy({ top: diffY, behavior: 'smooth' });
+    } else if (Math.abs(diffY) > 20) {
       window.scrollBy({ top: diffY, behavior: 'smooth' });
     }
 
     // 2. Horizontal alignment for trays / carousels
     let parent = el.parentElement;
     while (parent && parent !== document.body && parent !== document.documentElement) {
-      if (parent.scrollWidth > parent.clientWidth) {
+      if (parent.scrollWidth > parent.clientWidth + 20) {
         const pStyle = window.getComputedStyle(parent);
         const ox = pStyle.overflowX;
-        if (ox === 'auto' || ox === 'scroll' || pStyle.overflow === 'auto' || pStyle.overflow === 'scroll') {
+        if (ox === 'auto' || ox === 'scroll' || ox === 'hidden') {
           const pRect = parent.getBoundingClientRect();
           const cardRelLeft = rect.left - pRect.left;
           const targetX = pRect.width * 0.22;
@@ -1828,11 +1930,9 @@ html[data-momtv-zoom="135"] {
         el.focus({ preventScroll: true });
       } catch (_) {}
 
-      // Synthetic hover emulation for OTT sites (Hotstar, Netflix, JioCinema previews)
-      emulateMouseHover(el);
-
       // Auto-scroll to center (~40%)
       scrollIntoComfortZone(el);
+      emulateMouseHover(el);
       playSound('focus');
     }
   }
@@ -1923,27 +2023,53 @@ html[data-momtv-zoom="135"] {
     const currentCard = currentRow.cards[currentColIdx];
 
     switch (direction) {
-      // ◄ Left: Strictly navigates across cards in current row
+      // ◄ Left: Navigates across cards in current row or paginates carousel backwards
       case 'left': {
         if (currentColIdx > 0) {
           setFocus(currentRow.cards[currentColIdx - 1].el);
           return true;
         }
-        playSound('focus');
-        return true;
-      }
-
-      // ► Right: Strictly navigates across cards in current row
-      case 'right': {
-        if (currentColIdx < currentRow.cards.length - 1) {
-          setFocus(currentRow.cards[currentColIdx + 1].el);
+        const paginated = tryPaginateCarousel(currentCard.el, 'left');
+        if (paginated) {
+          playSound('focus');
+          showHUD('Previous', '◄');
+          setTimeout(() => {
+            const newGrid = buildCardGrid();
+            if (newGrid[currentRowIdx]) {
+              setFocus(newGrid[currentRowIdx].cards[0].el);
+            }
+          }, 240);
           return true;
         }
         playSound('focus');
         return true;
       }
 
-      // ▼ Down: Moves between rows directly below with closest horizontal alignment
+      // ► Right: Navigates across cards in current row or clicks carousel Next chevron
+      case 'right': {
+        if (currentColIdx < currentRow.cards.length - 1) {
+          setFocus(currentRow.cards[currentColIdx + 1].el);
+          return true;
+        }
+        const paginated = tryPaginateCarousel(currentCard.el, 'right');
+        if (paginated) {
+          playSound('focus');
+          showHUD('More', '►');
+          setTimeout(() => {
+            const newGrid = buildCardGrid();
+            if (newGrid[currentRowIdx]) {
+              const row = newGrid[currentRowIdx];
+              const nextIdx = Math.min(row.cards.length - 1, currentColIdx + 1);
+              setFocus(row.cards[nextIdx].el);
+            }
+          }, 240);
+          return true;
+        }
+        playSound('focus');
+        return true;
+      }
+
+      // ▼ Down: Moves between rows or triggers infinite scroll at page bottom
       case 'down': {
         if (currentRowIdx < grid.length - 1) {
           const nextRow = grid[currentRowIdx + 1];
@@ -1961,7 +2087,23 @@ html[data-momtv-zoom="135"] {
           setFocus(bestCard);
           return true;
         }
+
+        // Bottom row reached: trigger infinite vertical scroll to load more rows
+        const scrollContainer = findVerticalScrollContainer(currentCard.el);
+        const shiftY = Math.round(window.innerHeight * 0.55);
+        if (scrollContainer && scrollContainer !== window) {
+          scrollContainer.scrollBy({ top: shiftY, behavior: 'smooth' });
+        } else {
+          window.scrollBy({ top: shiftY, behavior: 'smooth' });
+        }
         playSound('focus');
+        showHUD('Loading More...', '▼');
+        setTimeout(() => {
+          const newGrid = buildCardGrid();
+          if (newGrid.length > currentRowIdx + 1) {
+            setFocus(newGrid[currentRowIdx + 1].cards[0].el);
+          }
+        }, 300);
         return true;
       }
 
@@ -2381,12 +2523,12 @@ html[data-momtv-zoom="135"] {
         return handled;
       }
 
-      // OK / Enter selection with synthetic coordinate click
+      // OK / Enter selection with direct action execution (link navigation or button click)
       if (['enter', 'ok', 'select'].includes(k)) {
         if (currentFocusedElement) {
           playSound('select');
           showHUD('Selected', '✓');
-          const res = emulateCoordinateClick(currentFocusedElement);
+          const res = executeCardAction(currentFocusedElement);
           lastHandledTime = Date.now();
           lastHandledKey = k;
           return res;
@@ -2419,7 +2561,8 @@ html[data-momtv-zoom="135"] {
     playSound: playSound,
     buildCardGrid: buildCardGrid,
     getFocusableCards: getFocusableCards,
-    emulateCoordinateClick: emulateCoordinateClick,
+    executeCardAction: executeCardAction,
+    emulateCoordinateClick: executeCardAction,
     emulateMouseHover: emulateMouseHover,
     moveCursor: moveCursor,
     setCursor: setCursor,

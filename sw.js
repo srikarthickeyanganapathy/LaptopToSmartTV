@@ -84,7 +84,13 @@ self.addEventListener("fetch", (event) => {
           }
           return networkResponse;
         })
-        .catch(() => caches.match(request) || caches.match("/index.html") || caches.match("/"))
+        .catch(async () => {
+          const match1 = await caches.match(request);
+          if (match1) return match1;
+          const match2 = await caches.match("/index.html");
+          if (match2) return match2;
+          return caches.match("/");
+        })
     );
     return;
   }

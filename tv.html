@@ -7,19 +7,19 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23e50914'/%3E%3Cpath d='M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z' fill='white'/%3E%3C/svg%3E">
   <style>
     /* ==========================================================================
-       10-FOOT UI DESIGN SYSTEM & RESET
+       10-FOOT CINEMA DESIGN SYSTEM & RESET (MOM TV 2.0)
        ========================================================================== */
     :root {
       --bg-oled: #07080b;
       --surface-1: rgba(255, 255, 255, 0.04);
       --surface-2: rgba(255, 255, 255, 0.08);
-      --surface-card: rgba(18, 20, 26, 0.75);
+      --surface-card: rgba(18, 22, 32, 0.85);
       --border-subtle: rgba(255, 255, 255, 0.12);
       --text-main: #FFFFFF;
-      --text-muted: rgba(255, 255, 255, 0.65);
-      --text-dim: rgba(255, 255, 255, 0.40);
-      --accent-active: #FF0000;
-      --glow-active: rgba(255, 0, 0, 0.45);
+      --text-muted: rgba(255, 255, 255, 0.70);
+      --text-dim: rgba(255, 255, 255, 0.45);
+      --accent-active: #00F0FF;
+      --glow-active: rgba(0, 240, 255, 0.55);
       --font-stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
@@ -73,8 +73,8 @@
       left: 10%;
       width: 80%;
       height: 90%;
-      background: radial-gradient(circle at 40% 40%, var(--glow-active) 0%, transparent 68%);
-      filter: blur(85px);
+      background: radial-gradient(circle at 40% 40%, var(--glow-active) 0%, transparent 70%);
+      filter: blur(95px);
       opacity: 0.65;
       transform: translateZ(0);
       transition: background 0.7s cubic-bezier(0.16, 1, 0.3, 1),
@@ -84,7 +84,7 @@
     .ambient-grid-overlay {
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at 50% 50%, rgba(7, 8, 11, 0.2) 0%, rgba(7, 8, 11, 0.92) 100%);
+      background: radial-gradient(circle at 50% 50%, rgba(7, 8, 11, 0.15) 0%, rgba(7, 8, 11, 0.94) 100%);
       pointer-events: none;
     }
 
@@ -97,19 +97,17 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
-      padding: 36px 60px 24px 60px;
+      padding: 34px 54px 22px 54px;
       justify-content: space-between;
     }
 
-    /* ==========================================================================
-       HEADER BAR
-       ========================================================================== */
+    /* HEADER BAR */
     .header-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       height: 64px;
-      margin-bottom: 8px;
+      padding: 0 4px;
     }
 
     .brand-cluster {
@@ -119,40 +117,40 @@
     }
 
     .brand-logo-icon {
-      width: 44px;
-      height: 44px;
-      background: linear-gradient(135deg, #e50914, #990000);
-      border-radius: 12px;
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #E50914 0%, #B81D24 100%);
+      border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 4px 18px rgba(229, 9, 20, 0.4);
+      box-shadow: 0 6px 20px rgba(229, 9, 20, 0.5);
     }
 
     .brand-logo-icon svg {
-      width: 26px;
-      height: 26px;
-      fill: #fff;
+      width: 28px;
+      height: 28px;
+      fill: #FFFFFF;
     }
 
     .brand-title {
       font-size: 28px;
-      font-weight: 800;
+      font-weight: 900;
       letter-spacing: -0.5px;
       color: #FFFFFF;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
 
     .brand-badge {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1.5px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 2px;
       text-transform: uppercase;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      padding: 4px 9px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      padding: 4px 10px;
       border-radius: 6px;
       color: rgba(255, 255, 255, 0.85);
     }
@@ -160,113 +158,94 @@
     .header-center-info {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 20px;
     }
 
-    /* STATUS PILL */
     .status-badge {
       display: flex;
       align-items: center;
       gap: 10px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-subtle);
       padding: 8px 18px;
-      background: rgba(18, 22, 30, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 40px;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-      transition: all 0.3s ease;
+      border-radius: 30px;
+      backdrop-filter: blur(12px);
     }
 
     .status-dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background: #10B981;
-      box-shadow: 0 0 10px #10B981;
-      animation: pulse-dot 2s infinite ease-in-out;
+      background: #00E676;
+      box-shadow: 0 0 10px #00E676;
+      animation: pulse-dot 2.5s infinite;
     }
 
     .status-dot.disconnected {
-      background: #F59E0B;
-      box-shadow: 0 0 10px #F59E0B;
+      background: #FF5252;
+      box-shadow: 0 0 10px #FF5252;
     }
 
     .status-dot.connected-phone {
-      background: #00E676;
-      box-shadow: 0 0 14px #00E676;
+      background: #00F0FF;
+      box-shadow: 0 0 12px #00F0FF;
     }
 
     @keyframes pulse-dot {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.25); opacity: 0.7; }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.85); }
     }
 
     .status-label {
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
-      color: rgba(255, 255, 255, 0.9);
-      letter-spacing: 0.2px;
+      color: rgba(255, 255, 255, 0.85);
     }
 
-    /* QUICK QR BUTTON IN HEADER */
     .btn-qr-pair {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 40px;
-      color: rgba(255, 255, 255, 0.85);
-      font-size: 14px;
-      font-weight: 600;
-      backdrop-filter: blur(12px);
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1.5px solid rgba(255, 255, 255, 0.22);
+      padding: 8px 18px;
+      border-radius: 30px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #FFFFFF;
       transition: all 0.2s ease;
     }
 
     .btn-qr-pair svg {
-      width: 16px;
-      height: 16px;
-      fill: currentColor;
-    }
-
-    .btn-qr-pair.focused {
-      background: #fff;
-      color: #000;
-      box-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
-      transform: scale(1.04);
+      width: 18px;
+      height: 18px;
+      fill: #FFFFFF;
     }
 
     .clock-cluster {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+      text-align: right;
     }
 
     .ambient-clock {
-      font-size: 40px;
+      font-size: 34px;
       font-weight: 800;
       letter-spacing: -0.5px;
       color: #FFFFFF;
-      line-height: 1;
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
+      line-height: 1.1;
     }
 
     .ambient-clock .ampm {
-      font-size: 18px;
-      font-weight: 600;
-      color: rgba(255, 255, 255, 0.65);
-      text-transform: uppercase;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-dim);
+      margin-left: 4px;
     }
 
     .ambient-date {
       font-size: 15px;
-      font-weight: 500;
-      color: rgba(255, 255, 255, 0.6);
-      margin-top: 4px;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.2px;
     }
 
     /* ==========================================================================
@@ -276,47 +255,45 @@
       display: flex;
       align-items: flex-end;
       justify-content: space-between;
-      padding: 24px 0 16px 0;
-      min-height: 190px;
-      position: relative;
+      height: 200px;
+      padding: 10px 4px;
     }
 
     .hero-content {
-      max-width: 780px;
-      transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                  transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 820px;
     }
 
     .hero-category-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
+      display: inline-block;
       font-size: 13px;
       font-weight: 800;
       letter-spacing: 2px;
       text-transform: uppercase;
       color: var(--accent-active);
       margin-bottom: 8px;
-      text-shadow: 0 0 14px var(--glow-active);
     }
 
     .hero-title {
-      font-size: 50px;
-      font-weight: 850;
-      letter-spacing: -0.8px;
-      line-height: 1.1;
+      font-size: 54px;
+      font-weight: 900;
+      letter-spacing: -1px;
+      line-height: 1.08;
       color: #FFFFFF;
       margin-bottom: 12px;
-      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9);
+      text-shadow: 0 4px 20px rgba(0, 0, 0, 0.85);
     }
 
     .hero-description {
-      font-size: 20px;
-      line-height: 1.45;
-      font-weight: 450;
+      font-size: 19px;
+      font-weight: 500;
+      line-height: 1.4;
       color: var(--text-muted);
-      margin-bottom: 16px;
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+      margin-bottom: 14px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
     }
 
     .hero-meta-row {
@@ -326,54 +303,51 @@
     }
 
     .meta-tag {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 1.2px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 1px;
       text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.1);
       padding: 4px 10px;
       border-radius: 6px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.8);
     }
 
     .hero-cta {
       display: flex;
       align-items: center;
       gap: 14px;
-      background: rgba(18, 22, 30, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 48px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       padding: 12px 24px;
-      backdrop-filter: blur(20px);
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+      border-radius: 40px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     }
 
     .keycap-icon {
-      background: linear-gradient(180deg, #FFFFFF 0%, #D4D4D8 100%);
+      background: #FFFFFF;
       color: #000000;
       font-size: 14px;
       font-weight: 900;
-      padding: 6px 14px;
-      border-radius: 8px;
-      box-shadow: 0 3px 0 #9E9EA7, 0 4px 12px rgba(0, 0, 0, 0.4);
+      padding: 4px 10px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
     }
 
     .cta-text {
       font-size: 17px;
       font-weight: 700;
       color: #FFFFFF;
-      letter-spacing: 0.2px;
     }
 
     /* ==========================================================================
-       INTERACTIVE APP SHELF (ROW 0)
+       APP SHELF TRACK (ROW 0) — 10-FOOT CINEMA SCALE
        ========================================================================== */
     .shelf-container {
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      margin-bottom: 12px;
+      gap: 12px;
     }
 
     .shelf-header {
@@ -384,35 +358,36 @@
     }
 
     .shelf-title {
-      font-size: 20px;
+      font-size: 22px;
       font-weight: 800;
       letter-spacing: 1px;
       text-transform: uppercase;
       color: rgba(255, 255, 255, 0.9);
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
 
     .shelf-hint {
-      font-size: 14px;
-      font-weight: 500;
+      font-size: 15px;
+      font-weight: 600;
       color: var(--text-dim);
     }
 
     .app-track {
       display: flex;
-      gap: 22px;
+      gap: 24px;
       overflow-x: auto;
       padding: 16px 8px 24px 8px;
       scroll-behavior: smooth;
+      align-items: center;
     }
 
-    /* APP CARD STYLING */
+    /* CINEMA POSTER APP CARD */
     .app-card {
-      flex: 0 0 250px;
-      height: 165px;
-      border-radius: 20px;
+      flex: 0 0 330px;
+      height: 205px;
+      border-radius: 22px;
       background: var(--surface-card);
       border: 2px solid var(--border-subtle);
       position: relative;
@@ -421,25 +396,34 @@
       flex-direction: column;
       justify-content: space-between;
       padding: 22px;
-      backdrop-filter: blur(14px);
-      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
-      transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2),
-                  border-color 0.25s ease,
-                  box-shadow 0.25s ease,
-                  background 0.25s ease;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+      transition: transform 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+                  border-color 0.22s ease,
+                  box-shadow 0.22s ease;
     }
 
-    .app-card-bg-gradient {
+    .app-card-poster {
       position: absolute;
       inset: 0;
-      opacity: 0.22;
-      transition: opacity 0.25s ease;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
       z-index: 1;
+      filter: brightness(0.68) contrast(1.05);
+      transition: filter 0.3s ease, transform 0.4s ease;
+    }
+
+    .app-card-scrim {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(7, 8, 11, 0.2) 0%, rgba(7, 8, 11, 0.55) 45%, rgba(7, 8, 11, 0.94) 100%);
+      z-index: 2;
     }
 
     .app-card-content {
       position: relative;
-      z-index: 2;
+      z-index: 3;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -447,60 +431,71 @@
     }
 
     .app-icon-wrapper {
-      width: 54px;
-      height: 54px;
+      width: 52px;
+      height: 52px;
       border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      background: rgba(10, 14, 24, 0.75);
+      border: 1.5px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
       transition: transform 0.25s ease;
+      overflow: hidden;
     }
 
     .app-icon-wrapper svg {
+      width: 30px;
+      height: 30px;
+    }
+
+    .app-icon-wrapper img {
       width: 32px;
       height: 32px;
+      object-fit: contain;
     }
 
     .app-card-text {
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 4px;
     }
 
     .app-name {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 800;
       letter-spacing: -0.3px;
       color: #FFFFFF;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
     }
 
     .app-subtitle {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-muted);
+      font-size: 15px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.78);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    /* APPLE TV 3D FOCUS ELEVATION & NEON FOCUS RING */
+    /* 4PX GLOWING NEON FOCUS RING */
     .app-card.focused {
-      transform: translateY(-8px) scale(1.08);
-      border-color: var(--card-accent, #FFFFFF);
-      background: rgba(26, 30, 42, 0.9);
-      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85),
-                  0 0 36px var(--card-glow, rgba(255, 255, 255, 0.4));
+      transform: translateY(-8px) scale(1.06);
+      outline: 4px solid var(--card-accent, #00F0FF);
+      outline-offset: 3px;
+      border-color: transparent;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95),
+                  0 0 38px var(--card-glow, rgba(0, 240, 255, 0.6));
       z-index: 5;
     }
 
-    .app-card.focused .app-card-bg-gradient {
-      opacity: 0.45;
+    .app-card.focused .app-card-poster {
+      filter: brightness(0.85) contrast(1.1);
+      transform: scale(1.06);
     }
 
     .app-card.focused .app-icon-wrapper {
@@ -512,9 +507,59 @@
     }
 
     @keyframes launch-pop {
-      0% { transform: scale(1.08); }
+      0% { transform: scale(1.06); }
       50% { transform: scale(0.96); filter: brightness(1.6); }
-      100% { transform: scale(1.08); filter: brightness(1.2); }
+      100% { transform: scale(1.06); filter: brightness(1.2); }
+    }
+
+    /* SPECIAL [+ ADD WEBSITE] TILE */
+    .app-card-add {
+      flex: 0 0 240px;
+      height: 205px;
+      border: 2.5px dashed rgba(255, 255, 255, 0.28) !important;
+      background: rgba(255, 255, 255, 0.03) !important;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      text-align: center;
+    }
+
+    .app-card-add .add-plus-circle {
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1.5px solid rgba(255, 255, 255, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      font-weight: 300;
+      color: #FFFFFF;
+      transition: all 0.2s ease;
+    }
+
+    .app-card-add .add-label {
+      font-size: 20px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .app-card-add.focused {
+      border: 2.5px solid #00F0FF !important;
+      background: rgba(0, 240, 255, 0.08) !important;
+      outline: 4px solid #00F0FF;
+      outline-offset: 3px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(0, 240, 255, 0.6);
+    }
+
+    .app-card-add.focused .add-plus-circle {
+      background: #00F0FF;
+      color: #07080B;
+      transform: scale(1.1);
+      box-shadow: 0 0 22px rgba(0, 240, 255, 0.9);
     }
 
     /* ==========================================================================
@@ -524,47 +569,49 @@
       display: flex;
       align-items: center;
       gap: 16px;
-      padding: 6px 4px;
+      padding: 4px 4px;
     }
 
     .util-card {
       flex: 1;
-      height: 58px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1.5px solid rgba(255, 255, 255, 0.09);
-      border-radius: 14px;
+      height: 62px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1.5px solid rgba(255, 255, 255, 0.11);
+      border-radius: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 12px;
       padding: 0 20px;
       backdrop-filter: blur(12px);
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
       transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
     }
 
     .util-card svg {
-      width: 22px;
-      height: 22px;
-      fill: rgba(255, 255, 255, 0.8);
+      width: 24px;
+      height: 24px;
+      fill: rgba(255, 255, 255, 0.85);
     }
 
     .util-label {
-      font-size: 16px;
+      font-size: 17px;
       font-weight: 700;
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.88);
       letter-spacing: 0.2px;
     }
 
     .util-card.focused {
       transform: translateY(-4px) scale(1.03);
-      background: rgba(255, 255, 255, 0.15);
-      border-color: #FFFFFF;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 22px rgba(255, 255, 255, 0.3);
+      background: rgba(255, 255, 255, 0.16);
+      border-color: #00F0FF;
+      outline: 3px solid #00F0FF;
+      outline-offset: 2px;
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.7), 0 0 26px rgba(0, 240, 255, 0.5);
     }
 
     .util-card.focused svg {
-      fill: #FFFFFF;
+      fill: #00F0FF;
     }
     .util-card.focused .util-label {
       color: #FFFFFF;
@@ -577,52 +624,52 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 42px;
+      height: 44px;
       padding: 0 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.07);
-      margin-top: 6px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      margin-top: 4px;
     }
 
     .guide-legend {
       display: flex;
       align-items: center;
-      gap: 24px;
+      gap: 26px;
     }
 
     .guide-item {
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
       color: var(--text-dim);
     }
 
     .guide-key {
       background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      padding: 3px 8px;
-      border-radius: 5px;
-      font-size: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 13px;
       font-weight: 800;
-      color: rgba(255, 255, 255, 0.8);
+      color: rgba(255, 255, 255, 0.85);
     }
 
     .guide-author {
-      font-size: 13px;
-      font-weight: 600;
-      color: rgba(255, 255, 255, 0.3);
+      font-size: 14px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.35);
       letter-spacing: 0.5px;
     }
 
     /* ==========================================================================
-       SCAN TO CONNECT PAIRING MODAL
+       MODALS (PAIRING QR & CUSTOM APP BUILDER)
        ========================================================================== */
     .modal-overlay {
       position: fixed;
       inset: 0;
       z-index: 1000;
-      background: rgba(4, 5, 8, 0.88);
+      background: rgba(4, 5, 8, 0.90);
       backdrop-filter: blur(28px);
       display: flex;
       align-items: center;
@@ -637,32 +684,32 @@
       pointer-events: auto;
     }
 
-    .qr-modal-card {
+    .modal-card {
       background: #0E1118;
-      border: 2px solid rgba(255, 255, 255, 0.18);
+      border: 2px solid rgba(255, 255, 255, 0.2);
       border-radius: 32px;
       padding: 44px 50px;
-      max-width: 640px;
+      max-width: 680px;
       width: 90%;
       text-align: center;
       display: flex;
       flex-direction: column;
       align-items: center;
-      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.9), 0 0 50px rgba(229, 9, 20, 0.2);
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.95), 0 0 50px rgba(0, 240, 255, 0.2);
       transform: scale(0.92);
       transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    .modal-overlay.active .qr-modal-card {
+    .modal-overlay.active .modal-card {
       transform: scale(1);
     }
 
     .qr-header-tag {
       font-size: 13px;
       font-weight: 800;
-      letter-spacing: 2px;
+      letter-spacing: 2.5px;
       text-transform: uppercase;
-      color: #E50914;
+      color: #00F0FF;
       margin-bottom: 8px;
     }
 
@@ -679,7 +726,7 @@
       color: var(--text-muted);
       line-height: 1.4;
       margin-bottom: 24px;
-      max-width: 460px;
+      max-width: 520px;
     }
 
     .qr-frame {
@@ -687,7 +734,7 @@
       padding: 18px;
       border-radius: 20px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-      margin-bottom: 24px;
+      margin-bottom: 22px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -695,7 +742,7 @@
       height: 250px;
     }
 
-    .qr-frame img, .qr-frame canvas {
+    .qr-frame img {
       width: 100%;
       height: 100%;
       display: block;
@@ -716,37 +763,8 @@
       font-family: monospace;
     }
 
-    .qr-steps {
-      display: flex;
-      gap: 20px;
-      margin-bottom: 24px;
-      text-align: left;
-    }
-
-    .qr-step {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.7);
-    }
-
-    .qr-step-num {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: #E50914;
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 800;
-      flex-shrink: 0;
-    }
-
     .modal-dismiss-hint {
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
       color: var(--text-dim);
       display: flex;
@@ -754,8 +772,146 @@
       gap: 8px;
     }
 
+    /* CUSTOM WEBSITE FORM STYLES */
+    .add-form-container {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      text-align: left;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-label {
+      font-size: 16px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .input-with-button {
+      display: flex;
+      gap: 12px;
+    }
+
+    .tv-input {
+      flex: 1;
+      height: 52px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 2px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      padding: 0 18px;
+      font-size: 18px;
+      color: #FFFFFF;
+      font-family: var(--font-stack);
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .tv-input:focus,
+    .tv-input.active-field {
+      border-color: #00F0FF;
+      background: rgba(255, 255, 255, 0.14);
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+    }
+
+    .tv-action-btn {
+      height: 52px;
+      padding: 0 24px;
+      background: rgba(0, 240, 255, 0.15);
+      border: 2px solid #00F0FF;
+      border-radius: 12px;
+      color: #00F0FF;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .tv-action-btn:focus,
+    .tv-action-btn.active-field {
+      background: #00F0FF;
+      color: #07080B;
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.8);
+      transform: scale(1.04);
+    }
+
+    .preview-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .preview-label {
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+    }
+
+    .preview-card {
+      width: 100% !important;
+      height: 135px !important;
+      align-self: center;
+    }
+
+    .form-btn-row {
+      display: flex;
+      gap: 14px;
+      margin-top: 10px;
+    }
+
+    .tv-btn {
+      flex: 1;
+      height: 54px;
+      border-radius: 14px;
+      font-size: 18px;
+      font-weight: 800;
+      border: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .tv-btn-cancel {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.18);
+      color: #FFFFFF;
+    }
+
+    .tv-btn-cancel:focus,
+    .tv-btn-cancel.active-field {
+      border-color: #FFFFFF;
+      background: rgba(255, 255, 255, 0.22);
+      box-shadow: 0 0 20px rgba(255, 255, 255, 0.4);
+      transform: scale(1.04);
+    }
+
+    .tv-btn-save {
+      background: linear-gradient(135deg, #00C853 0%, #009624 100%);
+      border-color: #00E676;
+      color: #FFFFFF;
+    }
+
+    .tv-btn-save:focus,
+    .tv-btn-save.active-field {
+      border-color: #FFFFFF;
+      box-shadow: 0 0 30px rgba(0, 230, 118, 0.8);
+      transform: scale(1.04);
+    }
+
     /* ==========================================================================
-       APPLE TV STYLE AMBIENT SCREENSAVER
+       APPLE TV AMBIENT SCREENSAVER (SCENIC 4K & OLED QUADRANT SHIFT)
        ========================================================================== */
     #screensaver {
       position: fixed;
@@ -764,11 +920,8 @@
       background: #020305;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 1.8s ease-in-out;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      transition: opacity 1.4s ease-in-out;
+      overflow: hidden;
     }
 
     #screensaver.active {
@@ -776,28 +929,79 @@
       pointer-events: auto;
     }
 
-    #screensaver-canvas {
+    .saver-bg-slide {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
+      background-size: cover;
+      background-position: center;
+      opacity: 0;
+      transform: scale(1.06);
+      transition: opacity 2s ease-in-out, transform 14s linear;
       z-index: 1;
     }
 
-    .saver-content {
-      position: relative;
-      z-index: 2;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
-      animation: float-saver 8s infinite ease-in-out;
+    .saver-bg-slide.visible {
+      opacity: 1;
+      transform: scale(1);
     }
 
-    @keyframes float-saver {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-12px); }
+    .saver-vignette {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 50%, rgba(2, 3, 5, 0.2) 0%, rgba(2, 3, 5, 0.85) 100%);
+      z-index: 2;
+    }
+
+    /* OLED PROTECTION: CLOCK DRIFTS BETWEEN 4 QUADRANTS */
+    .saver-content {
+      position: absolute;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.95);
+      transition: top 1.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  bottom 1.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  left 1.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  right 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Quadrant Classes for OLED Burn-in mitigation */
+    .quad-top-left {
+      top: 10%;
+      left: 8%;
+      bottom: auto;
+      right: auto;
+      align-items: flex-start;
+      text-align: left;
+    }
+
+    .quad-top-right {
+      top: 10%;
+      right: 8%;
+      bottom: auto;
+      left: auto;
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .quad-bottom-right {
+      bottom: 12%;
+      right: 8%;
+      top: auto;
+      left: auto;
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .quad-bottom-left {
+      bottom: 12%;
+      left: 8%;
+      top: auto;
+      right: auto;
+      align-items: flex-start;
+      text-align: left;
     }
 
     .saver-badge {
@@ -805,66 +1009,60 @@
       font-weight: 800;
       letter-spacing: 4px;
       text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.6);
-      margin-bottom: 12px;
-      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 10px;
+      background: rgba(0, 0, 0, 0.45);
       padding: 6px 18px;
       border-radius: 30px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
     }
 
     .saver-clock {
-      font-size: 110px;
+      font-size: 118px;
       font-weight: 200;
       letter-spacing: -2px;
       color: #FFFFFF;
       line-height: 1;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .saver-date {
-      font-size: 28px;
-      font-weight: 400;
-      color: rgba(255, 255, 255, 0.75);
+      font-size: 30px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
       letter-spacing: 0.5px;
-      margin-bottom: 36px;
+      margin-bottom: 24px;
     }
 
     .saver-prompt {
       display: flex;
       align-items: center;
       gap: 10px;
-      font-size: 16px;
+      font-size: 17px;
       font-weight: 600;
-      color: rgba(255, 255, 255, 0.5);
-      background: rgba(0, 0, 0, 0.4);
-      padding: 8px 20px;
+      color: rgba(255, 255, 255, 0.65);
+      background: rgba(0, 0, 0, 0.55);
+      padding: 8px 22px;
       border-radius: 40px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      animation: pulse-prompt 3s infinite ease-in-out;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(12px);
     }
 
-    @keyframes pulse-prompt {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 0.9; }
-    }
-
-    /* ==========================================================================
-       LAUNCH TOAST NOTIFICATION
-       ========================================================================== */
+    /* LAUNCH TOAST */
     .toast-overlay {
       position: fixed;
       bottom: 60px;
       left: 50%;
       transform: translateX(-50%) translateY(30px);
       background: rgba(14, 18, 26, 0.95);
-      border: 2px solid #E50914;
+      border: 2px solid #00F0FF;
       border-radius: 40px;
       padding: 16px 36px;
       display: flex;
       align-items: center;
       gap: 16px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(229, 9, 20, 0.5);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 240, 255, 0.5);
       opacity: 0;
       pointer-events: none;
       z-index: 2000;
@@ -880,7 +1078,7 @@
       width: 22px;
       height: 22px;
       border: 3px solid rgba(255, 255, 255, 0.2);
-      border-top-color: #E50914;
+      border-top-color: #00F0FF;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
@@ -890,7 +1088,7 @@
     }
 
     .toast-text {
-      font-size: 19px;
+      font-size: 20px;
       font-weight: 700;
       color: #FFFFFF;
     }
@@ -942,7 +1140,7 @@
           10:45 <span class="ampm">AM</span>
         </div>
         <div class="ambient-date" id="ambient-date">
-          Tuesday, September 22
+          Loading...
         </div>
       </div>
     </header>
@@ -978,231 +1176,9 @@
         <div class="shelf-hint">Use ◄ ► Arrow keys to navigate</div>
       </div>
 
-      <!-- APP CARDS TRACK (ROW 0) -->
+      <!-- DYNAMIC APP CARDS TRACK (ROW 0) -->
       <div class="app-track" id="app-track">
-        <!-- 1. YouTube TV -->
-        <div class="app-card focused"
-             data-index="0"
-             data-row="0"
-             data-col="0"
-             data-app="youtube"
-             data-target="youtube"
-             data-title="YouTube TV"
-             data-subtitle="Leanback 4K TV"
-             data-category="STREAMING ENTERTAINMENT"
-             data-desc="Watch favorite music, shows, recipe channels, bhajans, and live events in 4K Leanback mode."
-             data-accent="#FF0000"
-             data-glow="rgba(255, 0, 0, 0.45)"
-             style="--card-accent:#FF0000; --card-glow:rgba(255,0,0,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #FF0000 0%, #660000 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#FF0000">
-                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">YouTube TV</div>
-              <div class="app-subtitle">Leanback 4K TV</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 2. Disney+ Hotstar -->
-        <div class="app-card"
-             data-index="1"
-             data-row="0"
-             data-col="1"
-             data-app="hotstar"
-             data-target="hotstar"
-             data-title="Disney+ Hotstar"
-             data-subtitle="Movies & Specials"
-             data-category="MOVIES & DRAMAS"
-             data-desc="Blockbuster movies, family dramas, Hotstar specials, and live sports in Dolby Vision."
-             data-accent="#2250F4"
-             data-glow="rgba(34, 80, 244, 0.45)"
-             style="--card-accent:#2250F4; --card-glow:rgba(34,80,244,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #0C20D6 0%, #030A36 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#F4C542">
-                <path d="M12 2l2.9 6.6L22 9.2l-5.3 4.7 1.6 7.1L12 17.3 5.7 21l1.6-7.1L2 9.2l7.1-.6L12 2z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">Disney+ Hotstar</div>
-              <div class="app-subtitle">Movies & Specials</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 3. Netflix -->
-        <div class="app-card"
-             data-index="2"
-             data-row="0"
-             data-col="2"
-             data-app="netflix"
-             data-target="netflix"
-             data-title="Netflix"
-             data-subtitle="Series & Cinema"
-             data-category="GLOBAL ENTERTAINMENT"
-             data-desc="Award-winning cinema, international hits, wildlife documentaries, and personalized family profiles."
-             data-accent="#E50914"
-             data-glow="rgba(229, 9, 20, 0.45)"
-             style="--card-accent:#E50914; --card-glow:rgba(229,9,20,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #E50914 0%, #150000 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#E50914">
-                <path d="M5.398 0v24c1.17-.468 2.37-.899 3.597-1.293V0H5.398zm9.605 0v19.467c1.23.367 2.43.766 3.599 1.199V0h-3.599zM8.995 0v1.734l6.008 17.587V0H8.995z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">Netflix</div>
-              <div class="app-subtitle">Series & Cinema</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 4. Prime Video -->
-        <div class="app-card"
-             data-index="3"
-             data-row="0"
-             data-col="3"
-             data-app="prime"
-             data-target="prime"
-             data-title="Prime Video"
-             data-subtitle="Amazon Originals"
-             data-category="AMAZON ORIGINALS"
-             data-desc="Latest cinema blockbusters, family comedy releases, and award-winning Amazon Originals."
-             data-accent="#00A8E1"
-             data-glow="rgba(0, 168, 225, 0.45)"
-             style="--card-accent:#00A8E1; --card-glow:rgba(0,168,225,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #00A8E1 0%, #001F3F 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#00A8E1">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">Prime Video</div>
-              <div class="app-subtitle">Amazon Originals</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 5. JioCinema / Live TV -->
-        <div class="app-card"
-             data-index="4"
-             data-row="0"
-             data-col="4"
-             data-app="jiocinema"
-             data-target="jiocinema"
-             data-title="JioCinema Live TV"
-             data-subtitle="Live TV & Cricket"
-             data-category="LIVE SPORTS & TELEVISION"
-             data-desc="Free live Indian television channels, daily soaps, comedy serials, and high-energy cricket streams."
-             data-accent="#E11D74"
-             data-glow="rgba(225, 29, 116, 0.45)"
-             style="--card-accent:#E11D74; --card-glow:rgba(225,29,116,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #E11D74 0%, #3D021E 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#E11D74">
-                <path d="M12 2L2 22h20L12 2zm0 4.2L18.4 19H5.6L12 6.2z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">JioCinema</div>
-              <div class="app-subtitle">Live TV & Cricket</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 6. Bhajans & Devotional Music -->
-        <div class="app-card"
-             data-index="5"
-             data-row="0"
-             data-col="5"
-             data-app="bhajans"
-             data-target="bhajans"
-             data-title="Bhajans & Devotional"
-             data-subtitle="Morning Aarti & Prayers"
-             data-category="DEVOTIONAL & PEACE"
-             data-desc="Start the day with peaceful morning bhajans, temple aartis, holy mantras, and calming chants for Mom."
-             data-accent="#FF8C00"
-             data-glow="rgba(255, 140, 0, 0.5)"
-             style="--card-accent:#FF8C00; --card-glow:rgba(255,140,0,0.5);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #FF7700 0%, #4A1E00 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#FFB800">
-                <path d="M12 2C11.5 2 11 3.5 11 5c0 1.5 1 2.5 1 2.5s1-1 1-2.5c0-1.5-.5-3-1-3zm-7 8c0 4.4 3.6 8 8 8s8-3.6 8-8H5zm8 10c-3 0-5.5 1.5-6.8 3.5h13.6C18.5 21.5 16 20 13 20z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">Bhajans & Prayers</div>
-              <div class="app-subtitle">Morning Aarti & Peace</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 7. Family Photos & Memories -->
-        <div class="app-card"
-             data-index="6"
-             data-row="0"
-             data-col="6"
-             data-app="photos"
-             data-target="photos"
-             data-title="Family Memories"
-             data-subtitle="Photos & Slideshow"
-             data-category="FAMILY & NOSTALGIA"
-             data-desc="Relive treasured family moments, holiday albums, and celebration photos on the big TV screen."
-             data-accent="#10B981"
-             data-glow="rgba(16, 185, 129, 0.45)"
-             style="--card-accent:#10B981; --card-glow:rgba(16,185,129,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #059669 0%, #022C22 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#10B981">
-                <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">Family Photos</div>
-              <div class="app-subtitle">Albums & Memories</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 8. Daily News / DD News -->
-        <div class="app-card"
-             data-index="7"
-             data-row="0"
-             data-col="7"
-             data-app="news"
-             data-target="news"
-             data-title="Daily News Live"
-             data-subtitle="DD News & Weather"
-             data-category="LIVE NEWS & WEATHER"
-             data-desc="Catch up with real-time news bulletins, weather forecasts, and national DD News live broadcasts."
-             data-accent="#0EA5E9"
-             data-glow="rgba(14, 165, 233, 0.45)"
-             style="--card-accent:#0EA5E9; --card-glow:rgba(14,165,233,0.45);">
-          <div class="app-card-bg-gradient" style="background: linear-gradient(135deg, #0284C7 0%, #082F49 100%);"></div>
-          <div class="app-card-content">
-            <div class="app-icon-wrapper">
-              <svg viewBox="0 0 24 24" fill="#38BDF8">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-              </svg>
-            </div>
-            <div class="app-card-text">
-              <div class="app-name">Daily News Live</div>
-              <div class="app-subtitle">DD News Bulletins</div>
-            </div>
-          </div>
-        </div>
+        <!-- Rendered dynamically by JavaScript -->
       </div>
     </section>
 
@@ -1224,15 +1200,31 @@
         <span class="util-label">Pair Phone Remote</span>
       </div>
 
-      <!-- U1: Screensaver Standby -->
+      <!-- U1: Add Custom Website -->
       <div class="util-card"
            data-index="1"
            data-row="1"
            data-col="1"
+           data-action="add_website"
+           data-title="Add Custom Website"
+           data-subtitle="Add any website with auto poster preview"
+           data-desc="Add any OTT, news, recipe, or blog website to MOM TV with automated poster metadata extraction."
+           onclick="openAddWebsiteModal()">
+        <svg viewBox="0 0 24 24">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        <span class="util-label">+ Add Website</span>
+      </div>
+
+      <!-- U2: Screensaver Standby -->
+      <div class="util-card"
+           data-index="2"
+           data-row="1"
+           data-col="2"
            data-action="screensaver"
            data-title="Ambient Screensaver"
-           data-subtitle="Cinematic clock and starfield"
-           data-desc="Enter low-power ambient clock and peaceful aurora starfield screensaver."
+           data-subtitle="Cinematic 4K scenic photos and drifting clock"
+           data-desc="Enter peaceful ambient scenery screensaver with OLED burn-in protection."
            onclick="startScreensaver()">
         <svg viewBox="0 0 24 24">
           <path d="M12.3 2a10 10 0 0 0-1.9 19.8 10 10 0 0 0 11.5-11.5A10 10 0 0 0 12.3 2zm-1.3 17.8A8 8 0 0 1 9.2 4.1a8 8 0 1 1 8.8 14.7 8.2 8.2 0 0 1-7 1z"/>
@@ -1240,11 +1232,11 @@
         <span class="util-label">Ambient Screensaver</span>
       </div>
 
-      <!-- U2: Mute Volume Toggle -->
+      <!-- U3: Mute Volume Toggle -->
       <div class="util-card"
-           data-index="2"
+           data-index="3"
            data-row="1"
-           data-col="2"
+           data-col="3"
            data-action="mute"
            data-title="Mute TV Audio"
            data-subtitle="Toggle master sound"
@@ -1256,11 +1248,11 @@
         <span class="util-label" id="mute-label">Mute TV Audio</span>
       </div>
 
-      <!-- U3: Refresh Launcher -->
+      <!-- U4: Refresh Launcher -->
       <div class="util-card"
-           data-index="3"
+           data-index="4"
            data-row="1"
-           data-col="3"
+           data-col="4"
            data-action="reload"
            data-title="Refresh Launcher"
            data-subtitle="Reload TV interface"
@@ -1272,15 +1264,15 @@
         <span class="util-label">Refresh Launcher</span>
       </div>
 
-      <!-- U4: Exit to Windows -->
+      <!-- U5: Exit to Windows -->
       <div class="util-card"
-           data-index="4"
+           data-index="5"
            data-row="1"
-           data-col="4"
+           data-col="5"
            data-action="exit_windows"
            data-title="Exit to Windows"
            data-subtitle="Close TV mode and return to desktop"
-           data-desc="Close TV mode and return to desktop"
+           data-desc="Close Brave Kiosk and restore normal Windows 11 desktop."
            onclick="exitToWindows()">
         <svg viewBox="0 0 24 24">
           <path d="M3 5.479l7.377-1.016v7.127H3V5.48zm0 13.042l7.377 1.017v-7.04H3v6.023zm8.333 1.148L21 21V11.59h-9.667v8.079zm0-15.338V10.59H21V3l-9.667 1.331z"/>
@@ -1295,7 +1287,7 @@
         <div class="guide-item"><span class="guide-key">▲ ▼ ◄ ►</span> Navigate</div>
         <div class="guide-item"><span class="guide-key">OK / Enter</span> Launch</div>
         <div class="guide-item"><span class="guide-key">Q</span> Pair Remote</div>
-        <div class="guide-item"><span class="guide-key">S</span> Standby</div>
+        <div class="guide-item"><span class="guide-key">S</span> Screensaver</div>
         <div class="guide-item"><span class="guide-key">Esc / Back</span> Close Modal</div>
       </div>
       <div class="guide-author">MOM TV 2.0 • 10-FOOT LEANBACK SYSTEM</div>
@@ -1304,33 +1296,18 @@
 
   <!-- SCAN TO CONNECT PAIRING MODAL -->
   <div class="modal-overlay" id="qr-modal" onclick="closeQrModal()">
-    <div class="qr-modal-card" onclick="event.stopPropagation()">
+    <div class="modal-card" onclick="event.stopPropagation()">
       <div class="qr-header-tag">INSTANT PHONE PAIRING</div>
       <h2 class="qr-modal-title">Connect Mom's Phone Remote</h2>
       <p class="qr-modal-subtitle">
-        Open the camera app on Mom's Android or iPhone, point it at this QR code, and tap the notification to start controlling.
+        Open the camera app on Mom's phone, point it at this QR code, and tap the banner to connect instantly.
       </p>
 
       <div class="qr-frame">
         <img id="qr-image" alt="Pairing QR Code" src="/api/qr.svg" />
       </div>
 
-      <div class="qr-url-pill" id="qr-url-text">http://192.168.1.5:8765</div>
-
-      <div class="qr-steps">
-        <div class="qr-step">
-          <div class="qr-step-num">1</div>
-          <div>Open phone camera</div>
-        </div>
-        <div class="qr-step">
-          <div class="qr-step-num">2</div>
-          <div>Point at QR code</div>
-        </div>
-        <div class="qr-step">
-          <div class="qr-step-num">3</div>
-          <div>Tap banner to open Remote</div>
-        </div>
-      </div>
+      <div class="qr-url-pill" id="qr-url-text">http://127.0.0.1:8765</div>
 
       <div class="modal-dismiss-hint">
         <span class="keycap-icon">OK</span> or <span class="keycap-icon">ESC</span> Press to return to TV Launcher
@@ -1338,10 +1315,65 @@
     </div>
   </div>
 
-  <!-- APPLE TV STYLE AMBIENT SCREENSAVER -->
+  <!-- ADD CUSTOM WEBSITE MODAL -->
+  <div class="modal-overlay" id="add-website-modal" onclick="closeAddWebsiteModal()">
+    <div class="modal-card" style="max-width: 680px;" onclick="event.stopPropagation()">
+      <div class="qr-header-tag">CUSTOM TV CHANNELS</div>
+      <h2 class="qr-modal-title">Add Any Website to MOM TV</h2>
+      <p class="qr-modal-subtitle">
+        Enter the website URL. MOM TV will automatically fetch its poster image, icon, and title.
+      </p>
+
+      <div class="add-form-container">
+        <div class="form-group">
+          <label class="form-label" for="custom-url-input">Website URL or Address</label>
+          <div class="input-with-button">
+            <input type="text" id="custom-url-input" class="tv-input" placeholder="e.g. hotstar.com or wikipedia.org" autocomplete="off" />
+            <button id="btn-fetch-preview" class="tv-action-btn" type="button" onclick="autoFetchMetadata()">
+              <span>Auto-Fetch</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="custom-name-input">Website Display Name</label>
+          <input type="text" id="custom-name-input" class="tv-input" placeholder="e.g. Wikipedia" autocomplete="off" />
+        </div>
+
+        <!-- Live Preview Section -->
+        <div class="preview-section">
+          <div class="preview-label">TV SCREEN PREVIEW:</div>
+          <div id="custom-preview-card" class="app-card preview-card" style="--card-accent: #00F0FF; --card-glow: rgba(0, 240, 255, 0.45);">
+            <img id="preview-poster" class="app-card-poster" src="" style="display:none;" />
+            <div class="app-card-scrim"></div>
+            <div class="app-card-content">
+              <div class="app-icon-wrapper" id="preview-icon-wrapper">
+                <span id="preview-icon-fallback" style="font-size: 26px;">🌐</span>
+                <img id="preview-icon-img" src="" style="display:none; width: 32px; height: 32px; object-fit: contain;" />
+              </div>
+              <div class="app-card-text">
+                <div class="app-name" id="preview-name">New Channel</div>
+                <div class="app-subtitle" id="preview-sub">Web Application</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-btn-row">
+          <button id="btn-cancel-custom" class="tv-btn tv-btn-cancel" type="button" onclick="closeAddWebsiteModal()">Cancel</button>
+          <button id="btn-save-custom" class="tv-btn tv-btn-save" type="button" onclick="saveCustomWebsite()">Save to MOM TV</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLE TV STYLE AMBIENT SCREENSAVER (SCENIC 4K & OLED QUADRANT SHIFT) -->
   <div id="screensaver">
-    <canvas id="screensaver-canvas"></canvas>
-    <div class="saver-content">
+    <div id="saver-slide-1" class="saver-bg-slide visible"></div>
+    <div id="saver-slide-2" class="saver-bg-slide"></div>
+    <div class="saver-vignette"></div>
+
+    <div class="saver-content quad-top-left" id="saver-content-box">
       <div class="saver-badge">MOM TV • AMBIENT CINEMA</div>
       <div class="saver-clock" id="saver-clock">10:45</div>
       <div class="saver-date" id="saver-date">Tuesday, September 22</div>
@@ -1359,7 +1391,8 @@
 
   <!-- ==========================================================================
        TV LAUNCHER CONTROLLER & SPATIAL ENGINE SCRIPT
-       ========================================================================== -->
+       ========================================================================== */
+  -->
   <script>
     /* ========================================================================
        1. WEB AUDIO API SYNTHESIZER (TACTILE TV AUDIO FEEDBACK)
@@ -1372,10 +1405,11 @@
           if (AC) this.ctx = new AC();
         }
         if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume();
+          this.ctx.resume().catch(() => {});
         }
       },
       click() {
+        if (state.isMuted) return;
         this.init();
         if (!this.ctx) return;
         try {
@@ -1383,8 +1417,8 @@
           const gain = this.ctx.createGain();
           const t = this.ctx.currentTime;
           osc.type = 'sine';
-          osc.frequency.setValueAtTime(620, t);
-          osc.frequency.exponentialRampToValueAtTime(340, t + 0.035);
+          osc.frequency.setValueAtTime(640, t);
+          osc.frequency.exponentialRampToValueAtTime(320, t + 0.035);
           gain.gain.setValueAtTime(0.12, t);
           gain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
           osc.connect(gain);
@@ -1393,12 +1427,32 @@
           osc.stop(t + 0.04);
         } catch (e) {}
       },
+      thud() {
+        if (state.isMuted) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const t = this.ctx.currentTime;
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(160, t);
+          osc.frequency.exponentialRampToValueAtTime(80, t + 0.05);
+          gain.gain.setValueAtTime(0.15, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.055);
+        } catch (e) {}
+      },
       chime() {
+        if (state.isMuted) return;
         this.init();
         if (!this.ctx) return;
         try {
           const now = this.ctx.currentTime;
-          const freqs = [523.25, 659.25, 783.99]; // C5, E5, G5 major triad
+          const freqs = [523.25, 659.25, 783.99]; // C5, E5, G5
           freqs.forEach((freq, idx) => {
             const osc = this.ctx.createOscillator();
             const gain = this.ctx.createGain();
@@ -1416,6 +1470,7 @@
         } catch (e) {}
       },
       back() {
+        if (state.isMuted) return;
         this.init();
         if (!this.ctx) return;
         try {
@@ -1439,23 +1494,182 @@
        2. STATE & SPATIAL NAVIGATION MATRIX
        ======================================================================== */
     const state = {
-      activeRow: 0,       // 0: App Shelf, 1: Utility Row
-      activeCol: 0,       // Column in current row
-      isModalOpen: false, // QR pairing modal active
+      activeRow: 0,            // 0: App Shelf, 1: Utility Row
+      activeCol: 0,            // Column index in current row
+      isQrModalOpen: false,    // Pairing modal open
+      isAddModalOpen: false,   // Add website modal open
+      addModalFieldIdx: 0,     // 0: URL input, 1: Auto-fetch btn, 2: Name input, 3: Cancel btn, 4: Save btn
       isScreensaver: false,
       isMuted: false,
       serverInfo: null,
       ws: null,
-      reconnectAttempts: 0
+      reconnectAttempts: 0,
+      apps: []
     };
 
-    const appCards = Array.from(document.querySelectorAll('.app-card'));
+    let appCards = Array.from(document.querySelectorAll('.app-card'));
     const utilCards = Array.from(document.querySelectorAll('.util-card'));
+
+    window.__tvState = state;
+    window.__tvAudioFeedback = AudioFeedback;
 
     const ambientGlow = document.getElementById('ambient-glow');
     const heroCategory = document.getElementById('hero-category');
     const heroTitle = document.getElementById('hero-title');
     const heroDescription = document.getElementById('hero-description');
+
+    /* ========================================================================
+       3. DYNAMIC APP SHELF POPULATION & RENDERING
+       ======================================================================== */
+    const DEFAULT_FALLBACK_APPS = [
+      {
+        id: 'youtube',
+        name: 'YouTube TV',
+        app: 'youtube',
+        url: 'https://www.youtube.com/tv',
+        poster: 'https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?q=80&w=800&auto=format&fit=crop',
+        icon: 'youtube',
+        category: 'Streaming Entertainment',
+        description: 'Watch favorite music, shows, recipe channels, bhajans, and live events in 4K Leanback mode.',
+        accent: '#FF0000',
+        glow: 'rgba(255, 0, 0, 0.45)',
+        is_custom: false
+      }
+    ];
+
+    function getAppSvgIcon(iconName, accent) {
+      const col = accent || "#00F0FF";
+      if (iconName === 'youtube') {
+        return `<svg viewBox="0 0 24 24" fill="${col}"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
+      }
+      if (iconName === 'netflix') {
+        return `<svg viewBox="0 0 24 24" fill="${col}"><path d="M5.398 0v24c1.17-.468 2.37-.899 3.597-1.293V0H5.398zm9.605 0v19.467c1.23.367 2.43.766 3.599 1.199V0h-3.599zM8.995 0v1.734l6.008 17.587V0H8.995z"/></svg>`;
+      }
+      if (iconName === 'hotstar') {
+        return `<svg viewBox="0 0 24 24" fill="#F4C542"><path d="M12 2l2.9 6.6L22 9.2l-5.3 4.7 1.6 7.1L12 17.3 5.7 21l1.6-7.1L2 9.2l7.1-.6L12 2z"/></svg>`;
+      }
+      if (iconName === 'prime') {
+        return `<svg viewBox="0 0 24 24" fill="${col}"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>`;
+      }
+      if (iconName === 'bhajans') {
+        return `<span style="font-size: 26px;">🪔</span>`;
+      }
+      if (iconName && (iconName.startsWith('http://') || iconName.startsWith('https://'))) {
+        return `<img src="${iconName}" alt="icon" onerror="this.outerHTML='<span style=\\'font-size:26px;\\'>🌐</span>'" />`;
+      }
+      return `<svg viewBox="0 0 24 24" fill="${col}"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>`;
+    }
+
+    async function fetchApps() {
+      try {
+        const res = await fetch('/api/apps');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.apps)) {
+            renderApps(data.apps.length > 0 ? data.apps : DEFAULT_FALLBACK_APPS);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch apps from API:', e);
+      }
+      renderApps(DEFAULT_FALLBACK_APPS);
+    }
+
+    function renderApps(appsList) {
+      state.apps = appsList;
+      const track = document.getElementById('app-track');
+      if (!track) return;
+      track.innerHTML = '';
+
+      appsList.forEach((app, idx) => {
+        const card = document.createElement('div');
+        card.className = 'app-card';
+        card.dataset.index = idx;
+        card.dataset.row = '0';
+        card.dataset.col = idx;
+        card.dataset.app = app.app || app.id || `app_${idx}`;
+        card.dataset.target = app.url || app.target || '';
+        card.dataset.title = app.name || 'Application';
+        card.dataset.subtitle = app.category || 'Streaming Channel';
+        card.dataset.category = (app.category || 'ENTERTAINMENT').toUpperCase();
+        card.dataset.desc = app.description || `Browse and watch ${app.name}`;
+        card.dataset.accent = app.accent || '#00F0FF';
+        card.dataset.glow = app.glow || 'rgba(0, 240, 255, 0.45)';
+
+        card.style.setProperty('--card-accent', app.accent || '#00F0FF');
+        card.style.setProperty('--card-glow', app.glow || 'rgba(0, 240, 255, 0.45)');
+
+        const posterSrc = app.poster || '';
+        const posterHtml = posterSrc ? `<img class="app-card-poster" src="${posterSrc}" alt="${app.name}" onerror="this.style.display='none'" />` : '';
+
+        card.innerHTML = `
+          ${posterHtml}
+          <div class="app-card-scrim"></div>
+          <div class="app-card-content">
+            <div class="app-icon-wrapper">
+              ${getAppSvgIcon(app.icon || app.app, app.accent)}
+            </div>
+            <div class="app-card-text">
+              <div class="app-name">${app.name}</div>
+              <div class="app-subtitle">${app.category || 'Channel'}</div>
+            </div>
+          </div>
+        `;
+
+        card.addEventListener('pointerenter', () => {
+          state.activeRow = 0;
+          state.activeCol = idx;
+          updateFocus();
+        });
+
+        card.addEventListener('click', () => {
+          state.activeRow = 0;
+          state.activeCol = idx;
+          executeCurrentSelection();
+        });
+
+        track.appendChild(card);
+      });
+
+      // Append [+ Add Website] Card at the end of the shelf
+      const addCard = document.createElement('div');
+      addCard.className = 'app-card app-card-add';
+      const addCol = appsList.length;
+      addCard.dataset.index = addCol;
+      addCard.dataset.row = '0';
+      addCard.dataset.col = addCol;
+      addCard.dataset.app = 'add_website';
+      addCard.dataset.title = 'Add Any Website';
+      addCard.dataset.subtitle = 'Customize your TV apps shelf';
+      addCard.dataset.category = 'CUSTOM APPS';
+      addCard.dataset.desc = 'Add any OTT service, news channel, recipe site, or social feed to your MOM TV Launcher.';
+      addCard.dataset.accent = '#00F0FF';
+      addCard.dataset.glow = 'rgba(0, 240, 255, 0.55)';
+
+      addCard.innerHTML = `
+        <div class="add-plus-circle">+</div>
+        <div class="add-label">Add Website</div>
+      `;
+
+      addCard.addEventListener('pointerenter', () => {
+        state.activeRow = 0;
+        state.activeCol = addCol;
+        updateFocus();
+      });
+
+      addCard.addEventListener('click', () => {
+        state.activeRow = 0;
+        state.activeCol = addCol;
+        openAddWebsiteModal();
+      });
+
+      track.appendChild(addCard);
+
+      // Rebind card array
+      appCards = Array.from(document.querySelectorAll('.app-card'));
+      updateFocus();
+    }
 
     function updateFocus() {
       // Clear focus across all elements
@@ -1468,9 +1682,7 @@
           card.classList.add('focused');
           card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
 
-          // Update Hero Spotlight details
           const title = card.dataset.title;
-          const subtitle = card.dataset.subtitle;
           const cat = card.dataset.category;
           const desc = card.dataset.desc;
           const accent = card.dataset.accent;
@@ -1480,7 +1692,6 @@
           heroCategory.textContent = cat;
           heroDescription.textContent = desc;
 
-          // Dynamic Ambient glow
           document.documentElement.style.setProperty('--accent-active', accent);
           document.documentElement.style.setProperty('--glow-active', glow);
         }
@@ -1488,14 +1699,11 @@
         const util = utilCards[state.activeCol];
         if (util) {
           util.classList.add('focused');
-          // Ambient glow white/subtle for utilities
-          document.documentElement.style.setProperty('--accent-active', '#FFFFFF');
-          document.documentElement.style.setProperty('--glow-active', 'rgba(255, 255, 255, 0.25)');
+          document.documentElement.style.setProperty('--accent-active', '#00F0FF');
+          document.documentElement.style.setProperty('--glow-active', 'rgba(0, 240, 255, 0.3)');
 
-          // Update Hero Spotlight details for utility card
           const title = util.dataset.title || util.querySelector('.util-label')?.textContent || 'Utility';
-          const subtitle = util.dataset.subtitle || '';
-          const desc = util.dataset.desc || subtitle;
+          const desc = util.dataset.desc || '';
 
           heroTitle.textContent = title;
           heroCategory.textContent = 'SYSTEM UTILITY';
@@ -1504,7 +1712,6 @@
       }
     }
 
-    // Strict step-lock debounce state for launcher navigation
     let lastKeyDownTime = 0;
     let lastNavigateTime = 0;
     const STEP_LOCK_DEBOUNCE_MS = 160;
@@ -1515,52 +1722,84 @@
         return;
       }
       lastNavigateTime = now;
-      lastKeyDownTime = now; // Synchronize keydown and programmatic navigate locks
+      lastKeyDownTime = now;
 
       resetInactivityTimer();
 
+      // If Add Custom Website Modal is open, navigate form fields
+      if (state.isAddModalOpen) {
+        navigateAddModal(direction);
+        return;
+      }
+
       if (state.activeRow === 0) {
-        // App Shelf Navigation (strictly advances by exactly 1 card within bounds)
+        // App Shelf Navigation
         if (direction === 'left') {
-          state.activeCol = Math.max(0, state.activeCol - 1);
+          if (state.activeCol > 0) {
+            state.activeCol = Math.max(0, state.activeCol - 1);
+            AudioFeedback.click();
+          } else {
+            AudioFeedback.thud();
+          }
         } else if (direction === 'right') {
-          state.activeCol = Math.min(appCards.length - 1, state.activeCol + 1);
+          if (state.activeCol < appCards.length - 1) {
+            state.activeCol = Math.min(appCards.length - 1, state.activeCol + 1);
+            AudioFeedback.click();
+          } else {
+            AudioFeedback.thud();
+          }
         } else if (direction === 'down') {
           state.activeRow = 1;
-          // Map column proportionally to util cards
           const appMax = Math.max(1, appCards.length - 1);
           const utilMax = Math.max(1, utilCards.length - 1);
           state.activeCol = Math.max(0, Math.min(utilCards.length - 1, Math.round((state.activeCol / appMax) * utilMax)));
+          AudioFeedback.click();
         }
       } else if (state.activeRow === 1) {
-        // Utility Row Navigation (strictly advances by exactly 1 card within bounds)
+        // Utility Row Navigation
         if (direction === 'left') {
-          state.activeCol = Math.max(0, state.activeCol - 1);
+          if (state.activeCol > 0) {
+            state.activeCol--;
+            AudioFeedback.click();
+          } else {
+            AudioFeedback.thud();
+          }
         } else if (direction === 'right') {
-          state.activeCol = Math.min(utilCards.length - 1, state.activeCol + 1);
+          if (state.activeCol < utilCards.length - 1) {
+            state.activeCol++;
+            AudioFeedback.click();
+          } else {
+            AudioFeedback.thud();
+          }
         } else if (direction === 'up') {
           state.activeRow = 0;
           const appMax = Math.max(1, appCards.length - 1);
           const utilMax = Math.max(1, utilCards.length - 1);
           state.activeCol = Math.max(0, Math.min(appCards.length - 1, Math.round((state.activeCol / utilMax) * appMax)));
+          AudioFeedback.click();
         }
       }
 
-      // Play acoustic audio feedback once per valid navigate step
-      AudioFeedback.click();
       updateFocus();
     }
+
+    window.__tvNavigate = navigate;
 
     function executeCurrentSelection() {
       resetInactivityTimer();
 
-      if (state.isModalOpen) {
+      if (state.isScreensaver) {
+        dismissScreensaver();
+        return;
+      }
+
+      if (state.isQrModalOpen) {
         closeQrModal();
         return;
       }
 
-      if (state.isScreensaver) {
-        dismissScreensaver();
+      if (state.isAddModalOpen) {
+        executeAddModalAction();
         return;
       }
 
@@ -1570,6 +1809,12 @@
           const app = card.dataset.app;
           const target = card.dataset.target;
           const title = card.dataset.title;
+
+          if (app === 'add_website') {
+            openAddWebsiteModal();
+            return;
+          }
+
           launchApp(target, app, title, card);
         }
       } else if (state.activeRow === 1) {
@@ -1577,6 +1822,7 @@
         if (util) {
           const action = util.dataset.action;
           if (action === 'qr') openQrModal();
+          else if (action === 'add_website') openAddWebsiteModal();
           else if (action === 'screensaver') startScreensaver();
           else if (action === 'mute') toggleMute();
           else if (action === 'reload') window.location.reload();
@@ -1597,7 +1843,7 @@
     }
 
     /* ========================================================================
-       3. APP LAUNCH ENGINE
+       4. APP LAUNCH ENGINE
        ======================================================================== */
     function launchApp(target, app, title, cardEl) {
       AudioFeedback.chime();
@@ -1609,16 +1855,19 @@
 
       showToast(`Launching ${title}...`);
 
-      // Send launch instruction over WebSocket
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({
           cmd: 'launch',
           target: target,
-          app: app
+          app: app,
+          url: target
         }));
       } else {
-        // Fallback: request via HTTP API if available
-        fetch(`/api/launch?target=${encodeURIComponent(target)}`).catch(() => {});
+        fetch('/api/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: target, app: app })
+        }).catch(() => {});
       }
     }
 
@@ -1643,7 +1892,169 @@
     }
 
     /* ========================================================================
-       4. KEYBOARD & REMOTE INPUT LISTENER
+       5. ADD CUSTOM WEBSITE ENGINE & AUTO-PREVIEW
+       ======================================================================== */
+    const addModalFields = [
+      'custom-url-input',
+      'btn-fetch-preview',
+      'custom-name-input',
+      'btn-cancel-custom',
+      'btn-save-custom'
+    ];
+
+    function openAddWebsiteModal() {
+      AudioFeedback.chime();
+      state.isAddModalOpen = true;
+      document.getElementById('add-website-modal').classList.add('active');
+      state.addModalFieldIdx = 0;
+      updateAddModalFocus();
+    }
+
+    function closeAddWebsiteModal() {
+      AudioFeedback.back();
+      state.isAddModalOpen = false;
+      document.getElementById('add-website-modal').classList.remove('active');
+      // Reset form
+      document.getElementById('custom-url-input').value = '';
+      document.getElementById('custom-name-input').value = '';
+      resetLivePreview();
+      updateFocus();
+    }
+
+    function updateAddModalFocus() {
+      addModalFields.forEach((id, idx) => {
+        const el = document.getElementById(id);
+        if (el) {
+          if (idx === state.addModalFieldIdx) {
+            el.classList.add('active-field');
+            if (typeof el.focus === 'function') el.focus();
+          } else {
+            el.classList.remove('active-field');
+          }
+        }
+      });
+    }
+
+    function navigateAddModal(direction) {
+      AudioFeedback.click();
+      if (direction === 'down' || direction === 'right') {
+        state.addModalFieldIdx = (state.addModalFieldIdx + 1) % addModalFields.length;
+      } else if (direction === 'up' || direction === 'left') {
+        state.addModalFieldIdx = (state.addModalFieldIdx - 1 + addModalFields.length) % addModalFields.length;
+      }
+      updateAddModalFocus();
+    }
+
+    function executeAddModalAction() {
+      const currentId = addModalFields[state.addModalFieldIdx];
+      if (currentId === 'btn-fetch-preview') {
+        autoFetchMetadata();
+      } else if (currentId === 'btn-save-custom') {
+        saveCustomWebsite();
+      } else if (currentId === 'btn-cancel-custom') {
+        closeAddWebsiteModal();
+      }
+    }
+
+    let fetchedPoster = '';
+    let fetchedIcon = '';
+
+    function resetLivePreview() {
+      fetchedPoster = '';
+      fetchedIcon = '';
+      document.getElementById('preview-poster').style.display = 'none';
+      document.getElementById('preview-icon-img').style.display = 'none';
+      document.getElementById('preview-icon-fallback').style.display = 'block';
+      document.getElementById('preview-name').textContent = 'New Channel';
+      document.getElementById('preview-sub').textContent = 'Web Application';
+    }
+
+    async function autoFetchMetadata() {
+      const urlInput = document.getElementById('custom-url-input');
+      const rawUrl = urlInput.value.trim();
+      if (!rawUrl) {
+        showToast('Please enter a website URL first');
+        return;
+      }
+
+      showToast('Fetching website preview image...');
+      try {
+        const res = await fetch(`/api/app/preview?url=${encodeURIComponent(rawUrl)}`);
+        if (res.ok) {
+          const meta = await res.json();
+          if (meta.status === 'ok') {
+            if (meta.name) {
+              document.getElementById('custom-name-input').value = meta.name;
+              document.getElementById('preview-name').textContent = meta.name;
+            }
+            if (meta.poster) {
+              fetchedPoster = meta.poster;
+              const posterEl = document.getElementById('preview-poster');
+              posterEl.src = meta.poster;
+              posterEl.style.display = 'block';
+            }
+            if (meta.icon) {
+              fetchedIcon = meta.icon;
+              const iconImg = document.getElementById('preview-icon-img');
+              const fallback = document.getElementById('preview-icon-fallback');
+              iconImg.src = meta.icon;
+              iconImg.style.display = 'block';
+              fallback.style.display = 'none';
+            }
+            if (meta.description) {
+              document.getElementById('preview-sub').textContent = meta.description;
+            }
+            AudioFeedback.chime();
+            showToast('Website preview loaded!');
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Metadata preview fetch error:', e);
+      }
+      showToast('Could not auto-fetch. You can still save it!');
+    }
+
+    async function saveCustomWebsite() {
+      const url = document.getElementById('custom-url-input').value.trim();
+      const name = document.getElementById('custom-name-input').value.trim();
+
+      if (!url) {
+        showToast('Website URL is required!');
+        return;
+      }
+
+      const payload = {
+        name: name || url,
+        url: url,
+        poster: fetchedPoster || '',
+        icon: fetchedIcon || '',
+        category: 'Custom Web',
+        accent: '#00F0FF',
+        glow: 'rgba(0, 240, 255, 0.45)'
+      };
+
+      try {
+        const res = await fetch('/api/apps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          AudioFeedback.chime();
+          showToast(`Saved ${payload.name} to MOM TV!`);
+          closeAddWebsiteModal();
+          fetchApps();
+          return;
+        }
+      } catch (e) {
+        console.error('Error saving app:', e);
+      }
+      showToast('Failed to save website. Check server.');
+    }
+
+    /* ========================================================================
+       6. KEYBOARD & REMOTE INPUT LISTENER
        ======================================================================== */
     window.addEventListener('keydown', (e) => {
       // Wake from screensaver on ANY key press
@@ -1662,11 +2073,18 @@
         'q', 'Q', 's', 'S'
       ];
 
+      // Typing exception when inside input fields
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      if (isTyping && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        return; // Allow cursor movement inside text box
+      }
+
       if (!HANDLED_KEYS.includes(e.key)) {
         return;
       }
 
-      // Strict Step-Lock Debounce (160ms): cleanly drop duplicate / rapid key arrivals
       const now = Date.now();
       if (now - lastKeyDownTime < STEP_LOCK_DEBOUNCE_MS) {
         e.preventDefault();
@@ -1710,7 +2128,9 @@
         case 'Escape':
         case 'Backspace':
           AudioFeedback.back();
-          if (state.isModalOpen) {
+          if (state.isAddModalOpen) {
+            closeAddWebsiteModal();
+          } else if (state.isQrModalOpen) {
             closeQrModal();
           } else {
             showToast('MOM TV Home Active');
@@ -1720,7 +2140,7 @@
           break;
         case 'q':
         case 'Q':
-          if (state.isModalOpen) closeQrModal();
+          if (state.isQrModalOpen) closeQrModal();
           else openQrModal();
           e.preventDefault();
           e.stopPropagation();
@@ -1734,42 +2154,15 @@
       }
     }, true);
 
-    // Expose launcher API on window for automated verification and engine integration
+    // Expose launcher API on window for automated verification
     window.__tvState = state;
     window.__tvNavigate = navigate;
-    window.__tvAppCards = appCards;
+    window.__tvAppCards = () => appCards;
     window.__tvUtilCards = utilCards;
     window.__tvAudioFeedback = AudioFeedback;
 
-    /* Mouse & Pointer Events for click navigation */
-    appCards.forEach((card, idx) => {
-      card.addEventListener('pointerenter', () => {
-        state.activeRow = 0;
-        state.activeCol = idx;
-        updateFocus();
-      });
-      card.addEventListener('click', () => {
-        state.activeRow = 0;
-        state.activeCol = idx;
-        executeCurrentSelection();
-      });
-    });
-
-    utilCards.forEach((util, idx) => {
-      util.addEventListener('pointerenter', () => {
-        state.activeRow = 1;
-        state.activeCol = idx;
-        updateFocus();
-      });
-      util.addEventListener('click', () => {
-        state.activeRow = 1;
-        state.activeCol = idx;
-        executeCurrentSelection();
-      });
-    });
-
     /* ========================================================================
-       5. CLOCK & DATE ENGINE
+       7. CLOCK & DATE ENGINE
        ======================================================================== */
     function updateClock() {
       const now = new Date();
@@ -1785,7 +2178,6 @@
       const dateString = now.toLocaleDateString('en-US', options);
       document.getElementById('ambient-date').textContent = dateString;
 
-      // Also update screensaver clock
       const saverClock = document.getElementById('saver-clock');
       const saverDate = document.getElementById('saver-date');
       if (saverClock) saverClock.textContent = `${hours12}:${minutes} ${ampm}`;
@@ -1796,7 +2188,7 @@
     updateClock();
 
     /* ========================================================================
-       6. WEBSOCKET ENGINE (SERVER & PHONE REMOTE SYNC)
+       8. WEBSOCKET ENGINE (SERVER & PHONE REMOTE SYNC)
        ======================================================================== */
     const WS_PORT = 8766;
 
@@ -1820,12 +2212,19 @@
             const data = JSON.parse(event.data);
 
             if (data.type === 'clients_update') {
-              // Remote phone connected/disconnected
               const hasRemote = data.has_remote || data.count > 1;
               updateStatusBadge(true, hasRemote);
+              // Auto-dismiss QR modal when Mom connects!
+              if (hasRemote && state.isQrModalOpen) {
+                closeQrModal();
+              }
             } else if (data.type === 'welcome') {
               if (data.ip) {
                 updateQrCodeUrl(data.ip, data.http_port || 8765);
+              }
+            } else if (data.type === 'apps_updated') {
+              if (Array.isArray(data.apps)) {
+                renderApps(data.apps);
               }
             } else if (data.cmd === 'launch') {
               showToast(`Launching ${data.target || data.app}...`);
@@ -1836,7 +2235,6 @@
         };
 
         state.ws.onclose = () => {
-          console.warn('⚠️ WebSocket disconnected. Reconnecting...');
           updateStatusBadge(false, false);
           state.reconnectAttempts++;
           const timeout = Math.min(5000, 2000 + state.reconnectAttempts * 500);
@@ -1889,24 +2287,40 @@
     }
 
     /* ========================================================================
-       7. QR PAIRING MODAL
+       9. QR PAIRING MODAL
        ======================================================================== */
     function openQrModal() {
       AudioFeedback.chime();
-      state.isModalOpen = true;
+      state.isQrModalOpen = true;
       document.getElementById('qr-modal').classList.add('active');
     }
 
     function closeQrModal() {
       AudioFeedback.back();
-      state.isModalOpen = false;
+      state.isQrModalOpen = false;
       document.getElementById('qr-modal').classList.remove('active');
     }
 
     /* ========================================================================
-       8. AMBIENT APPLE TV SCREENSAVER (INACTIVITY DETECTOR & CANVAS)
+       10. APPLE TV SCENIC SCREENSAVER (4K SCENERY & OLED QUADRANT SHIFT)
        ======================================================================== */
-    const INACTIVITY_TIMEOUT = 150000; // 2.5 Minutes
+    const SCENIC_WALLPAPERS = [
+      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=1920&auto=format&fit=crop', // Yosemite Valley
+      'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1920&auto=format&fit=crop', // Starry Mountain Peaks
+      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1920&auto=format&fit=crop', // Tropical Sunset Beach
+      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1920&auto=format&fit=crop', // Northern Lights Aurora
+      'https://images.unsplash.com/photo-1448375240586-882707db888b?q=80&w=1920&auto=format&fit=crop'  // Deep Misty Forest
+    ];
+
+    let currentWallpaperIdx = 0;
+    let wallpaperInterval = null;
+    let oledShiftInterval = null;
+    let activeSlide = 1;
+
+    const QUADRANTS = ['quad-top-left', 'quad-top-right', 'quad-bottom-right', 'quad-bottom-left'];
+    let currentQuadrantIdx = 0;
+
+    const INACTIVITY_TIMEOUT = 180000; // 3 Minutes
     let inactivityTimer = null;
 
     function resetInactivityTimer() {
@@ -1918,10 +2332,49 @@
     }
 
     function startScreensaver() {
-      if (state.isModalOpen) closeQrModal();
+      if (state.isQrModalOpen) closeQrModal();
+      if (state.isAddModalOpen) closeAddWebsiteModal();
+
       state.isScreensaver = true;
       document.getElementById('screensaver').classList.add('active');
-      startScreensaverAnimation();
+
+      // Initialize scenic slide
+      const s1 = document.getElementById('saver-slide-1');
+      s1.style.backgroundImage = `url('${SCENIC_WALLPAPERS[currentWallpaperIdx]}')`;
+      s1.classList.add('visible');
+
+      // Cycle wallpapers every 14s
+      wallpaperInterval = setInterval(cycleWallpaper, 14000);
+
+      // Shift clock quadrant every 45s to protect OLED display from burn-in
+      oledShiftInterval = setInterval(shiftOledQuadrant, 45000);
+    }
+
+    function cycleWallpaper() {
+      currentWallpaperIdx = (currentWallpaperIdx + 1) % SCENIC_WALLPAPERS.length;
+      const nextUrl = SCENIC_WALLPAPERS[currentWallpaperIdx];
+
+      const s1 = document.getElementById('saver-slide-1');
+      const s2 = document.getElementById('saver-slide-2');
+
+      if (activeSlide === 1) {
+        s2.style.backgroundImage = `url('${nextUrl}')`;
+        s2.classList.add('visible');
+        s1.classList.remove('visible');
+        activeSlide = 2;
+      } else {
+        s1.style.backgroundImage = `url('${nextUrl}')`;
+        s1.classList.add('visible');
+        s2.classList.remove('visible');
+        activeSlide = 1;
+      }
+    }
+
+    function shiftOledQuadrant() {
+      currentQuadrantIdx = (currentQuadrantIdx + 1) % QUADRANTS.length;
+      const box = document.getElementById('saver-content-box');
+      QUADRANTS.forEach(q => box.classList.remove(q));
+      box.classList.add(QUADRANTS[currentQuadrantIdx]);
     }
 
     function dismissScreensaver() {
@@ -1929,98 +2382,31 @@
       AudioFeedback.click();
       state.isScreensaver = false;
       document.getElementById('screensaver').classList.remove('active');
-      stopScreensaverAnimation();
+
+      clearInterval(wallpaperInterval);
+      clearInterval(oledShiftInterval);
       resetInactivityTimer();
     }
-
-    // Screensaver Starfield & Aurora Canvas Animation
-    let saverAnimFrame = null;
-    const canvas = document.getElementById('screensaver-canvas');
-    const ctx = canvas.getContext('2d');
-    let stars = [];
-
-    function initStars() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      stars = [];
-      const numStars = 120;
-      for (let i = 0; i < numStars; i++) {
-        stars.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          radius: Math.random() * 1.8 + 0.5,
-          alpha: Math.random() * 0.7 + 0.2,
-          speed: Math.random() * 0.3 + 0.08,
-          phase: Math.random() * Math.PI * 2
-        });
-      }
-    }
-
-    function startScreensaverAnimation() {
-      initStars();
-      let step = 0;
-
-      function render() {
-        if (!state.isScreensaver) return;
-        step += 0.006;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Aurora borealis wave gradient
-        const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        const wave1 = Math.sin(step) * 0.2 + 0.3;
-        const wave2 = Math.cos(step * 0.7) * 0.2 + 0.3;
-        g.addColorStop(0, '#04060B');
-        g.addColorStop(0.5, `rgba(18, 30, 60, ${wave1})`);
-        g.addColorStop(1, `rgba(12, 10, 24, ${wave2})`);
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Render & drift stars
-        for (let s of stars) {
-          s.y -= s.speed;
-          if (s.y < 0) {
-            s.y = canvas.height;
-            s.x = Math.random() * canvas.width;
-          }
-          const twinkle = Math.sin(step * 3 + s.phase) * 0.3 + 0.7;
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha * twinkle})`;
-          ctx.shadowBlur = 6;
-          ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
-          ctx.fill();
-        }
-
-        saverAnimFrame = requestAnimationFrame(render);
-      }
-
-      render();
-    }
-
-    function stopScreensaverAnimation() {
-      if (saverAnimFrame) {
-        cancelAnimationFrame(saverAnimFrame);
-        saverAnimFrame = null;
-      }
-    }
-
-    window.addEventListener('resize', () => {
-      if (state.isScreensaver) initStars();
-    });
 
     ['pointerdown', 'mousemove', 'wheel'].forEach(evt => {
       window.addEventListener(evt, resetInactivityTimer, { passive: true });
     });
 
     /* ========================================================================
-       9. INITIALIZATION BOOT
+       11. INITIALIZATION BOOT
        ======================================================================== */
     window.addEventListener('DOMContentLoaded', () => {
-      updateFocus();
+      if (appCards.length === 0) {
+        appCards = Array.from(document.querySelectorAll('.app-card'));
+      }
+      if (appCards.length > 0) {
+        updateFocus(false);
+      }
+      fetchApps();
       resetInactivityTimer();
       initWebSocket();
       fetchServerInfo();
-      console.log('🚀 MOM TV 2.0 Leanback Launcher Loaded');
+      console.log('🚀 MOM TV 2.0 Leanback Cinema Launcher Ready.');
     });
   </script>
 </body>
