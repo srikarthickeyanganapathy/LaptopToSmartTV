@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141724"/>
+      <stop offset="50%" stop-color="#090A0F"/>
+      <stop offset="100%" stop-color="#050608"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF2A3A"/>
+      <stop offset="100%" stop-color="#E50914"/>
+    </linearGradient>
+    <linearGradient id="rimGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.2)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0.02)"/>
+    </linearGradient>
+    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FF2A3A" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FF2A3A" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- Base Squircle -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  <rect width="510" height="510" x="1" y="1" rx="127" fill="none" stroke="url(#rimGrad)" stroke-width="2"/>
+
+  <!-- Ambient Glow -->
+  <circle cx="256" cy="256" r="180" fill="url(#centerGlow)"/>
+
+  <!-- TV Display Outline -->
+  <g filter="url(#dropShadow)">
+    <rect x="76" y="96" width="360" height="240" rx="24" fill="#12151E" stroke="rgba(255,255,255,0.12)" stroke-width="4"/>
+    <rect x="92" y="112" width="328" height="208" rx="14" fill="#090A0F"/>
+    
+    <!-- TV Stand -->
+    <path d="M 216 336 L 200 376 L 312 376 L 296 336 Z" fill="#1E2230"/>
+    <rect x="180" y="374" width="152" height="8" rx="4" fill="#2E344A"/>
+    
+    <!-- Signal Wave Arcs (Broadcasting to TV) -->
+    <path d="M 226 170 A 42 42 0 0 1 286 170" fill="none" stroke="#FF2A3A" stroke-width="6" stroke-linecap="round" opacity="0.6"/>
+    <path d="M 206 150 A 70 70 0 0 1 306 150" fill="none" stroke="#FF2A3A" stroke-width="6" stroke-linecap="round" opacity="0.3"/>
+
+    <!-- Mini Remote Graphic inside Screen -->
+    <g transform="translate(256, 220)">
+      <!-- Remote Body -->
+      <rect x="-34" y="-38" width="68" height="110" rx="20" fill="url(#accentGrad)" stroke="rgba(255,255,255,0.3)" stroke-width="2.5"/>
+      <!-- Directional ring -->
+      <circle cx="0" cy="-6" r="18" fill="#141724" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+      <!-- Center OK dot -->
+      <circle cx="0" cy="-6" r="6" fill="#FFFFFF"/>
+      <!-- Rocker pills -->
+      <rect x="-18" y="24" width="14" height="26" rx="6" fill="#141724"/>
+      <rect x="4" y="24" width="14" height="26" rx="6" fill="#141724"/>
+    </g>
+  </g>
+
+  <!-- MOM TV Badge Text -->
+  <text x="256" y="440" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="36" font-weight="900" letter-spacing="6" fill="#FFFFFF">MOM TV</text>
+  <text x="256" y="470" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="600" letter-spacing="4" fill="#FF2A3A">SMART REMOTE</text>
+</svg>

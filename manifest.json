@@ -1,0 +1,48 @@
+{
+  "name": "MOM TV Remote",
+  "short_name": "Mom TV",
+  "description": "Studio-Grade Luxury Smart TV Remote Control",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#090a0f",
+  "background_color": "#090a0f",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["entertainment", "utilities"],
+  "shortcuts": [
+    {
+      "name": "TV Home",
+      "short_name": "Home",
+      "description": "Return to MOM TV Leanback Launcher",
+      "url": "/?cmd=home",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Voice Search",
+      "short_name": "Voice",
+      "description": "Voice search on TV",
+      "url": "/?cmd=voice",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

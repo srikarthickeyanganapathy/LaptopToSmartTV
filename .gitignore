@@ -1,0 +1,46 @@
+# Python bytecode and tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+.env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+apps.json
+
+# MOM TV local runtime data
+.brave_tv_profile/
+*.log
+logs/
+*.pid
+*.tmp
+*.temp
+
+# Generated test and build output
+scratch/__pycache__/
+dist/
+build/
+*.crx
+*.zip
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo

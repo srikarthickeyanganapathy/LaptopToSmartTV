@@ -1,0 +1,355 @@
+/* ==========================================================================
+   MOM TV LEANBACK COMPANION — STYLES (styles.css)
+   10-Foot TV Viewport Scaling, Glowing Neon Focus, Exit Dialog & OSD
+   ========================================================================== */
+
+/* ==========================================================================
+   1. 10-FOOT TV VIEWPORT SCALING
+   Applies a clean, readable 135% zoom on desktop streaming websites so movie
+   posters, cards, and text are large and readable from a sofa 10 feet away.
+   (Excluded on internal MOM TV pages like localhost:8765/tv).
+   ========================================================================== */
+html.momtv-10ft-scaled,
+html[data-momtv-zoom="135"] {
+  zoom: 1.35 !important;
+}
+
+/* ==========================================================================
+   2. GLOWING 4PX NEON CYAN FOCUS BOX
+   ========================================================================== */
+.momtv-card-focused,
+.momtv-focused {
+  outline: 4px solid #00f0ff !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.9) !important;
+  transform: scale(1.05) !important;
+  transition: transform 0.16s cubic-bezier(0.2, 0.9, 0.3, 1),
+              outline 0.15s ease,
+              box-shadow 0.16s ease !important;
+  z-index: 999999 !important;
+  position: relative !important;
+}
+
+/* Focus style for Search input elements */
+.momtv-focused-input {
+  outline: 4px solid #00f0ff !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.9) !important;
+  background-color: rgba(12, 16, 24, 0.95) !important;
+  color: #ffffff !important;
+  z-index: 999999 !important;
+}
+
+[data-tv-card="true"] {
+  outline: none;
+}
+
+/* ==========================================================================
+   3. SMART TV EXIT CONFIRMATION DIALOG
+   Center-screen glassmorphic dialog with backdrop blur
+   ========================================================================== */
+#momtv-exit-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(4, 7, 15, 0.82);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+#momtv-exit-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#momtv-exit-dialog {
+  background: linear-gradient(145deg, rgba(20, 28, 46, 0.94), rgba(10, 14, 24, 0.97));
+  border: 2px solid rgba(0, 240, 255, 0.5);
+  border-radius: 28px;
+  box-shadow: 0 35px 90px rgba(0, 0, 0, 0.95), 0 0 50px rgba(0, 240, 255, 0.3);
+  padding: 44px 52px;
+  max-width: 580px;
+  width: 90%;
+  text-align: center;
+  transform: scale(0.92) translateY(12px);
+  transition: transform 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+#momtv-exit-backdrop.visible #momtv-exit-dialog {
+  transform: scale(1) translateY(0);
+}
+
+.momtv-exit-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 0 16px rgba(0, 240, 255, 0.6));
+}
+
+.momtv-exit-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  margin: 0 0 14px 0;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+.momtv-exit-subtitle {
+  font-size: 18px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.5;
+  margin: 0 0 36px 0;
+}
+
+.momtv-exit-btn-row {
+  display: flex;
+  gap: 22px;
+  justify-content: center;
+  align-items: center;
+}
+
+.momtv-exit-btn {
+  flex: 1;
+  min-width: 170px;
+  padding: 16px 28px;
+  border-radius: 18px;
+  font-size: 19px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  outline: none;
+  user-select: none;
+  transition: transform 0.16s cubic-bezier(0.2, 0.9, 0.3, 1),
+              border-color 0.16s ease,
+              background 0.16s ease,
+              box-shadow 0.16s ease;
+}
+
+/* Neutral Gray Glass for Cancel */
+.momtv-btn-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+/* Vibrant Red/Cyan Glass for Exit to Home */
+.momtv-btn-exit {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.38), rgba(185, 28, 28, 0.52));
+  border: 2px solid rgba(239, 68, 68, 0.65);
+  color: #ffffff;
+}
+
+/* Active focus state on Cancel */
+.momtv-btn-cancel.active-focus {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border: 3px solid #00f0ff !important;
+  box-shadow: 0 0 30px rgba(0, 240, 255, 0.95), 0 0 15px rgba(255, 255, 255, 0.4) !important;
+  transform: scale(1.08) !important;
+}
+
+/* Active focus state on Exit */
+.momtv-btn-exit.active-focus {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.72), rgba(220, 38, 38, 0.88)) !important;
+  border: 3px solid #00f0ff !important;
+  box-shadow: 0 0 35px rgba(0, 240, 255, 0.95), 0 0 25px rgba(239, 68, 68, 0.8) !important;
+  transform: scale(1.08) !important;
+}
+
+.momtv-btn-icon {
+  font-size: 20px;
+}
+
+/* ==========================================================================
+   4. TV OSD HUD PILL & PROGRESS SEEKBAR
+   ========================================================================== */
+#momtv-hud-pill {
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  background: rgba(10, 14, 24, 0.94);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  color: #ffffff;
+  border: 1.5px solid rgba(0, 240, 255, 0.65);
+  border-radius: 20px;
+  padding: 14px 28px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 240, 255, 0.35);
+  z-index: 2147483647;
+  opacity: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.2s cubic-bezier(0.2, 0.9, 0.3, 1),
+              transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+  min-width: 240px;
+  text-align: center;
+}
+
+#momtv-hud-pill.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.momtv-osd-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.momtv-osd-time {
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+.momtv-osd-track {
+  width: 260px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+  display: none;
+}
+
+.momtv-osd-track.active {
+  display: block;
+}
+
+.momtv-osd-fill {
+  height: 100%;
+  background: #00f0ff;
+  border-radius: 999px;
+  box-shadow: 0 0 12px #00f0ff;
+  transition: width 0.12s linear;
+}
+
+/* ==========================================================================
+   5. FLOATING SMART TV PLAYER ACTION BAR
+   ========================================================================== */
+#momtv-player-action-bar {
+  position: fixed;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%) translateY(35px);
+  background: rgba(10, 14, 24, 0.94);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 2px solid rgba(0, 240, 255, 0.5);
+  border-radius: 24px;
+  padding: 14px 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(0, 240, 255, 0.3);
+  z-index: 2147483647;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s cubic-bezier(0.2, 0.9, 0.3, 1),
+              transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#momtv-player-action-bar.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.momtv-bar-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(0, 240, 255, 0.85);
+}
+
+.momtv-bar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.momtv-action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 10px 18px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.momtv-action-btn.active-focus {
+  background: rgba(0, 240, 255, 0.28) !important;
+  border-color: #00f0ff !important;
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.95) !important;
+  transform: scale(1.12) !important;
+  color: #ffffff !important;
+}
+
+.momtv-action-btn .btn-icon {
+  font-size: 18px;
+}
+
+.momtv-action-btn .btn-label {
+  font-size: 14px;
+  letter-spacing: 0.4px;
+}
+
+/* ==========================================================================
+   6. IN-BROWSER VIRTUAL MOUSE CURSOR FOR MAGIC TRACKPAD MODE
+   ========================================================================== */
+#momtv-virtual-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 28px;
+  pointer-events: none !important;
+  z-index: 2147483647;
+  opacity: 0;
+  transform: translate(-100px, -100px);
+  transition: opacity 0.22s cubic-bezier(0.2, 0.9, 0.3, 1), transform 0.04s linear;
+  filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.95)) drop-shadow(0 0 18px rgba(0, 240, 255, 0.65));
+  will-change: transform, opacity;
+}
+
+#momtv-virtual-cursor.visible {
+  opacity: 1;
+}
+
+#momtv-virtual-cursor.clicking {
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 1)) drop-shadow(0 0 28px rgba(0, 240, 255, 1));
+  transform: scale(0.85) !important;
+}

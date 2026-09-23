@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "MOM TV Leanback Companion",
+  "version": "2.0.0",
+  "description": "Transforms web streaming services into a 10-foot TV experience with snap-to-card navigation, TV exit dialogs, and video remote controls.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "MOM TV Leanback Companion"
+  },
+  "icons": {
+    "192": "icon-192.png",
+    "512": "icon-512.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
