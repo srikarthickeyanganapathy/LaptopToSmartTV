@@ -15,11 +15,38 @@
 (function () {
   'use strict';
 
-  if (window.__MOM_TV_EXTENSION_LOADED__ || window.__MOM_TV_ENGINE_LOADED__) {
+  if (window.__MOM_TV_EXTENSION_LOADED__ || window.__MOM_TV_ENGINE_LOADED__ || window.__MomTVLoaded || window.MomTV) {
     return;
   }
+  window.__MomTVLoaded = true;
   window.__MOM_TV_EXTENSION_LOADED__ = true;
   window.__MOM_TV_ENGINE_LOADED__ = true;
+
+  // Single-window enforcement for TV kiosk: intercept target="_blank"
+  try {
+    window.open = function (url) {
+      if (url) {
+        window.location.href = url;
+      }
+      return window;
+    };
+
+    document.addEventListener('click', function (e) {
+      var anchor = e.target && e.target.closest ? e.target.closest('a') : null;
+      if (anchor && (anchor.getAttribute('target') === '_blank' || anchor.target === '_blank')) {
+        anchor.setAttribute('target', '_self');
+        anchor.target = '_self';
+      }
+    }, true);
+
+    document.addEventListener('submit', function (e) {
+      var form = e.target;
+      if (form && (form.getAttribute('target') === '_blank' || form.target === '_blank')) {
+        form.setAttribute('target', '_self');
+        form.target = '_self';
+      }
+    }, true);
+  } catch (_) {}
 
   console.log('🚀 [MOM TV Companion 2.0] Initializing Native TV Extension Engine...');
 
@@ -365,9 +392,17 @@ html[data-momtv-zoom="135"] {
     (document.head || document.documentElement).appendChild(style);
   }
 
-  /* ==========================================================================
-     1. 10-FOOT TV VIEWPORT SCALING (135% ZOOM)
-     ========================================================================== */
+  function isElementInDoc(el) {
+    if (!el) return false;
+    if (document.documentElement && typeof document.documentElement.contains === 'function') {
+      return document.documentElement.contains(el);
+    }
+    if (typeof document.contains === 'function') {
+      return document.contains(el);
+    }
+    return true;
+  }
+
   function isInternalMomTVPage() {
     const host = (window.location.hostname || '').toLowerCase();
     const port = window.location.port || '';
@@ -416,12 +451,18 @@ html[data-momtv-zoom="135"] {
      2. PROCEDURAL WEB AUDIO SOUND ENGINE
      ========================================================================== */
   let audioCtx = null;
+  let masterGain = null;
 
   function initAudio() {
     if (!audioCtx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
         audioCtx = new AudioCtx();
+        if (typeof audioCtx.createGain === 'function') {
+          masterGain = audioCtx.createGain();
+          masterGain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+          masterGain.connect(audioCtx.destination);
+        }
       }
     }
     if (audioCtx && audioCtx.state === 'suspended') {
@@ -438,7 +479,7 @@ html[data-momtv-zoom="135"] {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.connect(gain);
-      gain.connect(audioCtx.destination);
+      gain.connect(masterGain || audioCtx.destination);
 
       if (type === 'focus') {
         // Crisp, warm Smart TV click tap (Apple TV / Tizen style)
@@ -585,7 +626,7 @@ html[data-momtv-zoom="135"] {
     isExitDialogOpen = false;
     playSound('back');
 
-    if (lastFocusedElementBeforeDialog && document.contains(lastFocusedElementBeforeDialog)) {
+    if (lastFocusedElementBeforeDialog && isElementInDoc(lastFocusedElementBeforeDialog)) {
       setFocus(lastFocusedElementBeforeDialog);
     }
   }
@@ -1483,6 +1524,35 @@ html[data-momtv-zoom="135"] {
   /* ==========================================================================
      7. STRUCTURAL CARD-ONLY FILTERING & DISCOVERY
      ========================================================================== */
+  let cachedFocusableCards = null;
+  let lastCardsScanTime = 0;
+  const CARDS_CACHE_TTL_MS = 600;
+
+  let cachedHeaderItems = null;
+  let lastHeaderScanTime = 0;
+  const HEADER_CACHE_TTL_MS = 1000;
+
+  function invalidateCardsCache() {
+    cachedFocusableCards = null;
+    lastCardsScanTime = 0;
+    cachedHeaderItems = null;
+    lastHeaderScanTime = 0;
+  }
+
+  // Auto-invalidate cache on dynamic DOM updates
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    const observer = new MutationObserver(() => {
+      invalidateCardsCache();
+    });
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+      document.addEventListener('DOMContentLoaded', () => {
+        if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+      });
+    }
+  }
+
   function isVisible(el) {
     if (!el || !el.getBoundingClientRect) return false;
     const style = window.getComputedStyle(el);
@@ -1576,7 +1646,15 @@ html[data-momtv-zoom="135"] {
     return false;
   }
 
-  function getFocusableCards() {
+  function getFocusableCards(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && cachedFocusableCards && (now - lastCardsScanTime < CARDS_CACHE_TTL_MS)) {
+      const valid = cachedFocusableCards.filter(isElementInDoc);
+      if (valid.length > 0) {
+        return valid;
+      }
+    }
+
     const CARD_SELECTORS = [
       // Semantic card elements
       'article',
@@ -1628,7 +1706,20 @@ html[data-momtv-zoom="135"] {
 
       // Standalone primary buttons outside header nav
       'button:not([disabled])',
-      '[role="button"]'
+      '[role="button"]',
+
+      // Universal interactive web elements (Links, Controls, Tabs, Inputs)
+      'a[href]',
+      '[role="button"]:not([aria-disabled="true"])',
+      '[role="link"]',
+      '[role="tab"]',
+      '[role="menuitem"]',
+      '[role="checkbox"]',
+      '[role="radio"]',
+      'input:not([type="hidden"]):not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])'
     ];
 
     const rawElements = Array.from(document.querySelectorAll(CARD_SELECTORS.join(',')));
@@ -1641,10 +1732,14 @@ html[data-momtv-zoom="135"] {
 
       const rect = el.getBoundingClientRect();
       const isCardGeom = rect.width >= 75 && rect.height >= 40;
-      const isBtnGeom = isPrimaryActionButton(el) && rect.width >= 50 && rect.height >= 24;
+      const isBtnGeom = isPrimaryActionButton(el) && rect.width >= 40 && rect.height >= 20;
+      const tag = (el.tagName || '').toUpperCase();
+      const isInteractiveTag = tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+      const isSmallInteractive = (isInteractiveTag || el.hasAttribute('tabindex')) && rect.width >= 16 && rect.height >= 16;
 
-      if (!isCardGeom && !isBtnGeom) continue;
+      if (!isCardGeom && !isBtnGeom && !isSmallInteractive) continue;
 
+      el._momTvRect = rect;
       candidates.push(el);
     }
 
@@ -1660,8 +1755,8 @@ html[data-momtv-zoom="135"] {
         const c2 = candidates[j];
 
         if (c2.contains(c1)) {
-          const r2 = c2.getBoundingClientRect();
-          const r1 = c1.getBoundingClientRect();
+          const r2 = c2._momTvRect || c2.getBoundingClientRect();
+          const r1 = c1._momTvRect || c1.getBoundingClientRect();
 
           // If c2 is a broad row holding multiple items horizontally, c1 is the real individual card!
           if (r2.width > r1.width * 1.8) {
@@ -1690,10 +1785,18 @@ html[data-momtv-zoom="135"] {
       card.setAttribute('data-tv-card', 'true');
     }
 
+    cachedFocusableCards = uniqueCards;
+    lastCardsScanTime = Date.now();
     return uniqueCards;
   }
 
-  function getHeaderItems() {
+  function getHeaderItems(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && cachedHeaderItems && (now - lastHeaderScanTime < HEADER_CACHE_TTL_MS)) {
+      const valid = cachedHeaderItems.filter(isElementInDoc);
+      if (valid.length > 0) return valid;
+    }
+
     const HEADER_SELECTORS = [
       'input[type="search"]',
       'input[type="text"]',
@@ -1717,6 +1820,7 @@ html[data-momtv-zoom="135"] {
       if (!isVisible(el)) continue;
 
       const rect = el.getBoundingClientRect();
+      el._momTvRect = rect;
       if (isSearchInput(el)) {
         if (rect.width >= 60 && rect.height >= 24) valid.push(el);
       } else if (rect.width >= 45 && rect.height >= 24) {
@@ -1725,11 +1829,13 @@ html[data-momtv-zoom="135"] {
     }
 
     valid.sort((a, b) => {
-      const ra = a.getBoundingClientRect();
-      const rb = b.getBoundingClientRect();
+      const ra = a._momTvRect || a.getBoundingClientRect();
+      const rb = b._momTvRect || b.getBoundingClientRect();
       return ra.left - rb.left;
     });
 
+    cachedHeaderItems = valid;
+    lastHeaderScanTime = Date.now();
     return valid;
   }
 
@@ -1739,15 +1845,15 @@ html[data-momtv-zoom="135"] {
   let currentFocusedElement = null;
   let isInHeaderMode = false;
 
-  function buildCardGrid() {
-    const cards = getFocusableCards();
+  function buildCardGrid(providedCards) {
+    const cards = providedCards || getFocusableCards();
     if (!cards.length) return [];
 
     const scrollX = window.scrollX || window.pageXOffset || 0;
     const scrollY = window.scrollY || window.pageYOffset || 0;
 
     const cardItems = cards.map((el) => {
-      const rect = el.getBoundingClientRect();
+      const rect = el._momTvRect || el.getBoundingClientRect();
       const top = rect.top + scrollY;
       const bottom = top + rect.height;
       const left = rect.left + scrollX;
@@ -1919,6 +2025,8 @@ html[data-momtv-zoom="135"] {
     currentFocusedElement = el;
 
     if (el) {
+      isInHeaderMode = Boolean(isInHeaderNav(el));
+
       if (isSearchInput(el)) {
         el.classList.add('momtv-focused-input');
       } else {
@@ -1937,7 +2045,119 @@ html[data-momtv-zoom="135"] {
     }
   }
 
+  function findSpatialCandidate(currentEl, direction, providedCards) {
+    if (!currentEl) return null;
+    const curRect = currentEl._momTvRect || currentEl.getBoundingClientRect();
+    const curCenterX = curRect.left + curRect.width / 2;
+    const curCenterY = curRect.top + curRect.height / 2;
+
+    const allCards = providedCards || getFocusableCards();
+    const headerItems = getHeaderItems();
+    const candidates = Array.from(new Set([...allCards, ...headerItems]));
+
+    let bestCandidate = null;
+    let minScore = Infinity;
+
+    for (const el of candidates) {
+      if (el === currentEl || !isVisible(el) || isJunkElement(el)) continue;
+      const rect = el._momTvRect || el.getBoundingClientRect();
+      const elCenterX = rect.left + rect.width / 2;
+      const elCenterY = rect.top + rect.height / 2;
+
+      let isValidDir = false;
+      let primaryDist = 0;
+      let secondaryDist = 0;
+      let hasOverlap = false;
+
+      if (direction === 'right') {
+        if (rect.left >= curRect.right - 15 || elCenterX > curCenterX + 10) {
+          isValidDir = true;
+          primaryDist = Math.max(0, rect.left - curRect.right);
+          secondaryDist = Math.abs(elCenterY - curCenterY);
+          hasOverlap = (rect.top < curRect.bottom && rect.bottom > curRect.top);
+        }
+      } else if (direction === 'left') {
+        if (rect.right <= curRect.left + 15 || elCenterX < curCenterX - 10) {
+          isValidDir = true;
+          primaryDist = Math.max(0, curRect.left - rect.right);
+          secondaryDist = Math.abs(elCenterY - curCenterY);
+          hasOverlap = (rect.top < curRect.bottom && rect.bottom > curRect.top);
+        }
+      } else if (direction === 'down') {
+        if (rect.top >= curRect.bottom - 15 || elCenterY > curCenterY + 10) {
+          isValidDir = true;
+          primaryDist = Math.max(0, rect.top - curRect.bottom);
+          secondaryDist = Math.abs(elCenterX - curCenterX);
+          hasOverlap = (rect.left < curRect.right && rect.right > curRect.left);
+        }
+      } else if (direction === 'up') {
+        if (rect.bottom <= curRect.top + 15 || elCenterY < curCenterY - 10) {
+          isValidDir = true;
+          primaryDist = Math.max(0, curRect.top - rect.bottom);
+          secondaryDist = Math.abs(elCenterX - curCenterX);
+          hasOverlap = (rect.left < curRect.right && rect.right > curRect.left);
+        }
+      }
+
+      if (isValidDir) {
+        const weight = (direction === 'left' || direction === 'right') ? 2.5 : 1.8;
+        let score = Math.hypot(primaryDist, secondaryDist * weight);
+        if (hasOverlap) {
+          score *= 0.65;
+        }
+        if (score < minScore) {
+          minScore = score;
+          bestCandidate = el;
+        }
+      }
+    }
+
+    return bestCandidate;
+  }
+
+  function autoFocusFirstElement() {
+    if (isYouTubeTVPage() || isInternalMomTVPage()) return;
+    if (currentFocusedElement && isElementInDoc(currentFocusedElement)) return;
+    const cards = getFocusableCards();
+    if (cards.length > 0) {
+      let best = cards[0];
+      let minScore = Infinity;
+      for (const c of cards) {
+        const r = c._momTvRect || c.getBoundingClientRect();
+        if (r.top >= 0 && r.left >= 0 && r.top < window.innerHeight && r.left < window.innerWidth) {
+          const s = r.top * 1.5 + r.left;
+          if (s < minScore) {
+            minScore = s;
+            best = c;
+          }
+        }
+      }
+      setFocus(best);
+    } else {
+      const headers = getHeaderItems();
+      if (headers.length > 0) {
+        setFocus(headers[0]);
+      }
+    }
+  }
+
+  // Attempt initial focus after dynamic page hydration
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'complete') {
+      setTimeout(autoFocusFirstElement, 350);
+    } else {
+      window.addEventListener('load', () => setTimeout(autoFocusFirstElement, 350), { once: true });
+    }
+  }
+
   function moveFocus(direction) {
+    // 0. Auto-Focus fallback if no element currently focused or detached from DOM
+    if (!currentFocusedElement || !isElementInDoc(currentFocusedElement)) {
+      autoFocusFirstElement();
+      if (currentFocusedElement) return true;
+      return false;
+    }
+
     // A. Header Navigation Mode
     if (isInHeaderMode) {
       const headerItems = getHeaderItems();
@@ -1948,14 +2168,20 @@ html[data-momtv-zoom="135"] {
         if (curIdx === -1) curIdx = 0;
 
         if (direction === 'left') {
-          const nextIdx = Math.max(0, curIdx - 1);
-          setFocus(headerItems[nextIdx]);
+          if (curIdx > 0) {
+            setFocus(headerItems[curIdx - 1]);
+            return true;
+          }
+          playSound('focus');
           return true;
         }
 
         if (direction === 'right') {
-          const nextIdx = Math.min(headerItems.length - 1, curIdx + 1);
-          setFocus(headerItems[nextIdx]);
+          if (curIdx < headerItems.length - 1) {
+            setFocus(headerItems[curIdx + 1]);
+            return true;
+          }
+          playSound('focus');
           return true;
         }
 
@@ -1965,22 +2191,16 @@ html[data-momtv-zoom="135"] {
         }
 
         if (direction === 'down') {
-          const grid = buildCardGrid();
+          isInHeaderMode = false;
+          const cards = getFocusableCards();
+          const next = findSpatialCandidate(currentFocusedElement, 'down', cards);
+          if (next) {
+            setFocus(next);
+            return true;
+          }
+          const grid = buildCardGrid(cards);
           if (grid.length > 0 && grid[0].cards.length > 0) {
-            isInHeaderMode = false;
-            const curRect = currentFocusedElement.getBoundingClientRect();
-            const curCenterX = curRect.left + curRect.width / 2;
-
-            let bestCard = grid[0].cards[0].el;
-            let minDiff = Infinity;
-            for (const c of grid[0].cards) {
-              const diff = Math.abs(c.centerX - curCenterX);
-              if (diff < minDiff) {
-                minDiff = diff;
-                bestCard = c.el;
-              }
-            }
-            setFocus(bestCard);
+            setFocus(grid[0].cards[0].el);
             return true;
           }
           return false;
@@ -1988,22 +2208,13 @@ html[data-momtv-zoom="135"] {
       }
     }
 
-    // B. Card Grid Matrix Mode
-    const grid = buildCardGrid();
-    if (!grid.length) {
-      const headerItems = getHeaderItems();
-      if (headerItems.length > 0) {
-        isInHeaderMode = true;
-        setFocus(headerItems[0]);
-        return true;
-      }
-      return false;
-    }
-
+    // B. Standard Grid Step First (Preserves existing matrix navigation)
+    const cards = getFocusableCards();
+    const grid = buildCardGrid(cards);
     let currentRowIdx = -1;
     let currentColIdx = -1;
 
-    if (currentFocusedElement) {
+    if (currentFocusedElement && grid.length > 0) {
       for (let r = 0; r < grid.length; r++) {
         const cIdx = grid[r].cards.findIndex((c) => c.el === currentFocusedElement);
         if (cIdx !== -1) {
@@ -2014,144 +2225,143 @@ html[data-momtv-zoom="135"] {
       }
     }
 
-    if (currentRowIdx === -1 || currentColIdx === -1) {
-      setFocus(grid[0].cards[0].el);
+    // If cleanly in row/column matrix, attempt adjacent move
+    if (currentRowIdx !== -1 && currentColIdx !== -1) {
+      const currentRow = grid[currentRowIdx];
+      const currentCard = currentRow.cards[currentColIdx];
+
+      if (direction === 'left' && currentColIdx > 0) {
+        setFocus(currentRow.cards[currentColIdx - 1].el);
+        return true;
+      }
+      if (direction === 'right' && currentColIdx < currentRow.cards.length - 1) {
+        setFocus(currentRow.cards[currentColIdx + 1].el);
+        return true;
+      }
+      if (direction === 'down' && currentRowIdx < grid.length - 1) {
+        const nextRow = grid[currentRowIdx + 1];
+        let bestCard = nextRow.cards[0].el;
+        let minDiff = Infinity;
+        for (const c of nextRow.cards) {
+          const diff = Math.abs(c.centerX - currentCard.centerX);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestCard = c.el;
+          }
+        }
+        setFocus(bestCard);
+        return true;
+      }
+      if (direction === 'up' && currentRowIdx > 0) {
+        const prevRow = grid[currentRowIdx - 1];
+        let bestCard = prevRow.cards[0].el;
+        let minDiff = Infinity;
+        for (const c of prevRow.cards) {
+          const diff = Math.abs(c.centerX - currentCard.centerX);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestCard = c.el;
+          }
+        }
+        setFocus(bestCard);
+        return true;
+      }
+      if (direction === 'up' && currentRowIdx === 0) {
+        const headerItems = getHeaderItems();
+        if (headerItems.length > 0) {
+          isInHeaderMode = true;
+          let bestHeader = headerItems[0];
+          let minDiff = Infinity;
+          for (const h of headerItems) {
+            const r = h._momTvRect || h.getBoundingClientRect();
+            const hCenterX = r.left + r.width / 2;
+            const diff = Math.abs(hCenterX - currentCard.centerX);
+            if (diff < minDiff) {
+              minDiff = diff;
+              bestHeader = h;
+            }
+          }
+          setFocus(bestHeader);
+          return true;
+        }
+      }
+    }
+
+    // C. 2D Spatial Vector Fallback (For irregular layouts, wrapped cards, sidebars, links)
+    const spatialNext = findSpatialCandidate(currentFocusedElement, direction, cards);
+    if (spatialNext) {
+      isInHeaderMode = Boolean(isInHeaderNav(spatialNext));
+      setFocus(spatialNext);
       return true;
     }
 
-    const currentRow = grid[currentRowIdx];
-    const currentCard = currentRow.cards[currentColIdx];
-
-    switch (direction) {
-      // ◄ Left: Navigates across cards in current row or paginates carousel backwards
-      case 'left': {
-        if (currentColIdx > 0) {
-          setFocus(currentRow.cards[currentColIdx - 1].el);
-          return true;
-        }
-        const paginated = tryPaginateCarousel(currentCard.el, 'left');
-        if (paginated) {
-          playSound('focus');
-          showHUD('Previous', '◄');
-          setTimeout(() => {
-            const newGrid = buildCardGrid();
-            if (newGrid[currentRowIdx]) {
-              setFocus(newGrid[currentRowIdx].cards[0].el);
-            }
-          }, 240);
-          return true;
-        }
+    // D. Boundary Actions (Carousel pagination or Page Scrolling)
+    if (direction === 'right') {
+      const paginated = tryPaginateCarousel(currentFocusedElement, 'right');
+      if (paginated) {
         playSound('focus');
-        return true;
-      }
-
-      // ► Right: Navigates across cards in current row or clicks carousel Next chevron
-      case 'right': {
-        if (currentColIdx < currentRow.cards.length - 1) {
-          setFocus(currentRow.cards[currentColIdx + 1].el);
-          return true;
-        }
-        const paginated = tryPaginateCarousel(currentCard.el, 'right');
-        if (paginated) {
-          playSound('focus');
-          showHUD('More', '►');
-          setTimeout(() => {
-            const newGrid = buildCardGrid();
-            if (newGrid[currentRowIdx]) {
-              const row = newGrid[currentRowIdx];
-              const nextIdx = Math.min(row.cards.length - 1, currentColIdx + 1);
-              setFocus(row.cards[nextIdx].el);
-            }
-          }, 240);
-          return true;
-        }
-        playSound('focus');
-        return true;
-      }
-
-      // ▼ Down: Moves between rows or triggers infinite scroll at page bottom
-      case 'down': {
-        if (currentRowIdx < grid.length - 1) {
-          const nextRow = grid[currentRowIdx + 1];
-          let bestCard = nextRow.cards[0].el;
-          let minDiff = Infinity;
-
-          for (const c of nextRow.cards) {
-            const diff = Math.abs(c.centerX - currentCard.centerX);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestCard = c.el;
-            }
-          }
-
-          setFocus(bestCard);
-          return true;
-        }
-
-        // Bottom row reached: trigger infinite vertical scroll to load more rows
-        const scrollContainer = findVerticalScrollContainer(currentCard.el);
-        const shiftY = Math.round(window.innerHeight * 0.55);
-        if (scrollContainer && scrollContainer !== window) {
-          scrollContainer.scrollBy({ top: shiftY, behavior: 'smooth' });
-        } else {
-          window.scrollBy({ top: shiftY, behavior: 'smooth' });
-        }
-        playSound('focus');
-        showHUD('Loading More...', '▼');
+        showHUD('More', '►');
+        invalidateCardsCache();
         setTimeout(() => {
-          const newGrid = buildCardGrid();
-          if (newGrid.length > currentRowIdx + 1) {
-            setFocus(newGrid[currentRowIdx + 1].cards[0].el);
-          }
-        }, 300);
+          const next = findSpatialCandidate(currentFocusedElement, 'right');
+          if (next) setFocus(next);
+        }, 240);
         return true;
       }
+      playSound('focus');
+      return true;
+    }
 
-      // ▲ Up: Moves between rows directly above
-      case 'up': {
-        if (currentRowIdx > 0) {
-          const prevRow = grid[currentRowIdx - 1];
-          let bestCard = prevRow.cards[0].el;
-          let minDiff = Infinity;
-
-          for (const c of prevRow.cards) {
-            const diff = Math.abs(c.centerX - currentCard.centerX);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestCard = c.el;
-            }
-          }
-
-          setFocus(bestCard);
-          return true;
-        }
-
-        // On Row 0: Up navigates to header search/tabs
-        if (currentRowIdx === 0) {
-          const headerItems = getHeaderItems();
-          if (headerItems.length > 0) {
-            isInHeaderMode = true;
-            let bestHeader = headerItems[0];
-            let minDiff = Infinity;
-
-            for (const h of headerItems) {
-              const r = h.getBoundingClientRect();
-              const hCenterX = r.left + r.width / 2;
-              const diff = Math.abs(hCenterX - currentCard.centerX);
-              if (diff < minDiff) {
-                minDiff = diff;
-                bestHeader = h;
-              }
-            }
-
-            setFocus(bestHeader);
-            return true;
-          }
-          playSound('focus');
-          return true;
-        }
-        break;
+    if (direction === 'left') {
+      const paginated = tryPaginateCarousel(currentFocusedElement, 'left');
+      if (paginated) {
+        playSound('focus');
+        showHUD('Previous', '◄');
+        invalidateCardsCache();
+        setTimeout(() => {
+          const next = findSpatialCandidate(currentFocusedElement, 'left');
+          if (next) setFocus(next);
+        }, 240);
+        return true;
       }
+      playSound('focus');
+      return true;
+    }
+
+    if (direction === 'down') {
+      const scrollContainer = findVerticalScrollContainer(currentFocusedElement);
+      const shiftY = Math.round(window.innerHeight * 0.55);
+      if (scrollContainer && scrollContainer !== window) {
+        scrollContainer.scrollBy({ top: shiftY, behavior: 'smooth' });
+      } else {
+        window.scrollBy({ top: shiftY, behavior: 'smooth' });
+      }
+      playSound('focus');
+      showHUD('Loading More...', '▼');
+      invalidateCardsCache();
+      setTimeout(() => {
+        const next = findSpatialCandidate(currentFocusedElement, 'down');
+        if (next) setFocus(next);
+      }, 300);
+      return true;
+    }
+
+    if (direction === 'up') {
+      const scrollContainer = findVerticalScrollContainer(currentFocusedElement);
+      const shiftY = Math.round(window.innerHeight * 0.55);
+      if (scrollContainer && scrollContainer !== window) {
+        scrollContainer.scrollBy({ top: -shiftY, behavior: 'smooth' });
+      } else {
+        window.scrollBy({ top: -shiftY, behavior: 'smooth' });
+      }
+      playSound('focus');
+      showHUD('Scrolling Up', '▲');
+      invalidateCardsCache();
+      setTimeout(() => {
+        const next = findSpatialCandidate(currentFocusedElement, 'up');
+        if (next) setFocus(next);
+      }, 300);
+      return true;
     }
 
     return false;
@@ -2414,7 +2624,7 @@ html[data-momtv-zoom="135"] {
      ========================================================================== */
   let lastHandledTime = 0;
   let lastHandledKey = '';
-  const ENGINE_DEBOUNCE_MS = 200;
+  const ENGINE_DEBOUNCE_MS = 140;
 
   window.MomTV = {
     handleKey: function (keyName) {
@@ -2525,6 +2735,9 @@ html[data-momtv-zoom="135"] {
 
       // OK / Enter selection with direct action execution (link navigation or button click)
       if (['enter', 'ok', 'select'].includes(k)) {
+        if (!currentFocusedElement || !isElementInDoc(currentFocusedElement)) {
+          autoFocusFirstElement();
+        }
         if (currentFocusedElement) {
           playSound('select');
           showHUD('Selected', '✓');
@@ -2561,6 +2774,7 @@ html[data-momtv-zoom="135"] {
     playSound: playSound,
     buildCardGrid: buildCardGrid,
     getFocusableCards: getFocusableCards,
+    invalidateCardsCache: invalidateCardsCache,
     executeCardAction: executeCardAction,
     emulateCoordinateClick: executeCardAction,
     emulateMouseHover: emulateMouseHover,

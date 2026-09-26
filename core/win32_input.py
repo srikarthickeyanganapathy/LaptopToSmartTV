@@ -1,0 +1,163 @@
+"""
+core/win32_input.py — Low-Level Windows Input Simulation & Power Controls
+Responsibilities: Virtual keystroke injection, text typing via SendInput, cursor parking, and display standby.
+"""
+
+import os
+import sys
+import ctypes
+from ctypes import wintypes
+import subprocess
+from core.config import VK_MAP
+
+__all__ = [
+    "user32",
+    "powrprof",
+    "KEYEVENTF_KEYUP",
+    "KEYEVENTF_UNICODE",
+    "INPUT_KEYBOARD",
+    "MOUSEEVENTF_MOVE",
+    "MOUSEEVENTF_LEFTDOWN",
+    "MOUSEEVENTF_LEFTUP",
+    "MOUSEEVENTF_RIGHTDOWN",
+    "MOUSEEVENTF_RIGHTUP",
+    "MOUSEEVENTF_WHEEL",
+    "KEYBDINPUT",
+    "INPUT",
+    "press_vk",
+    "combo",
+    "send_unicode_text",
+    "park_cursor",
+    "handle_volume",
+    "handle_power",
+]
+
+user32 = ctypes.windll.user32
+powrprof = getattr(ctypes.windll, "powrprof", None)
+
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+INPUT_KEYBOARD = 1
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_WHEEL = 0x0800
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_ulonglong),
+    ]
+
+
+class INPUT(ctypes.Structure):
+    class _INPUT(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT)]
+    _anonymous_ = ("_input",)
+    _fields_ = [("type", wintypes.DWORD), ("_input", _INPUT)]
+
+
+def press_vk(vk_code: int):
+    """Press and release a virtual key code."""
+    user32.keybd_event(vk_code, 0, 0, 0)
+    user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+
+
+def combo(vk_list: list):
+    """Press multiple keys simultaneously and release in reverse order."""
+    for vk in vk_list:
+        user32.keybd_event(vk, 0, 0, 0)
+    for vk in reversed(vk_list):
+        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+
+
+def send_unicode_text(text: str):
+    """Type arbitrary text accurately using SendInput KEYEVENTF_UNICODE."""
+    if not text:
+        return
+    try:
+        inputs = []
+        for char in text:
+            code = ord(char)
+            # Key Down
+            i_down = INPUT(type=INPUT_KEYBOARD)
+            i_down.ki.wVk = 0
+            i_down.ki.wScan = code
+            i_down.ki.dwFlags = KEYEVENTF_UNICODE
+            inputs.append(i_down)
+            # Key Up
+            i_up = INPUT(type=INPUT_KEYBOARD)
+            i_up.ki.wVk = 0
+            i_up.ki.wScan = code
+            i_up.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+            inputs.append(i_up)
+
+        n = len(inputs)
+        arr = (INPUT * n)(*inputs)
+        user32.SendInput(n, arr, ctypes.sizeof(INPUT))
+    except Exception:
+        # Fallback using VkKeyScanW if SendInput encounters platform limits
+        for char in text:
+            vk = user32.VkKeyScanW(ord(char))
+            vk_code = vk & 0xFF
+            shift = bool((vk >> 8) & 1)
+            if shift:
+                user32.keybd_event(0x10, 0, 0, 0)
+            press_vk(vk_code)
+            if shift:
+                user32.keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0)
+
+
+def park_cursor():
+    """Move cursor off-screen to (9999, 9999) to keep the TV display clean."""
+    try:
+        user32.SetCursorPos(9999, 9999)
+    except Exception as e:
+        print(f"[-] Failed to park cursor: {e}")
+
+
+def handle_volume(action: str):
+    """Handle volume commands (up, down, mute)."""
+    act = action.lower()
+    if act in ("up", "volume_up"):
+        press_vk(VK_MAP["volume_up"])
+    elif act in ("down", "volume_down"):
+        press_vk(VK_MAP["volume_down"])
+    elif act in ("mute", "toggle_mute", "volume_mute"):
+        press_vk(VK_MAP["volume_mute"])
+
+
+def handle_power(action: str):
+    """Handle power and display standby states."""
+    act = action.lower()
+    is_test = os.environ.get("MOM_TV_TEST_MODE") == "1"
+
+    if act in ("sleep", "standby"):
+        print("💤 Triggering Windows Sleep/Standby...")
+        if is_test:
+            print("  [TEST MODE] Sleep action simulated (bypassing hardware sleep for automated test)")
+            return
+        if powrprof and hasattr(powrprof, "SetSuspendState"):
+            powrprof.SetSuspendState(False, True, False)
+        else:
+            subprocess.run("rundll32.exe powrprof.dll,SetSuspendState 0,1,0", shell=True)
+    elif act in ("screen_off", "display_off", "blank"):
+        print("🖥️ Turning off display...")
+        if is_test:
+            print("  [TEST MODE] Display off simulated (bypassing display blanking for automated test)")
+            return
+        # HWND_BROADCAST=0xFFFF, WM_SYSCOMMAND=0x0112, SC_MONITORPOWER=0xF170, 2=Turn Off
+        user32.SendMessageW(0xFFFF, 0x0112, 0xF170, 2)
+    elif act in ("wake", "screen_on", "display_on"):
+        print("☀️ Waking screen...")
+        # -1 = Turn On
+        user32.SendMessageW(0xFFFF, 0x0112, 0xF170, -1)
+        # Nudge mouse slightly to notify Windows power manager
+        user32.mouse_event(MOUSEEVENTF_MOVE, 0, 1, 0, 0)
+        user32.mouse_event(MOUSEEVENTF_MOVE, 0, -1, 0, 0)

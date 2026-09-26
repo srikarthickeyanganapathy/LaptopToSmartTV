@@ -1395,6 +1395,19 @@
   -->
   <script>
     /* ========================================================================
+       0. MOM TV SECURITY TOKEN PERSISTENCE
+       ======================================================================== */
+    const urlParams = new URLSearchParams(window.location.search);
+    let momtvToken = urlParams.get('token') || localStorage.getItem('momtv_token') || '';
+    if (urlParams.get('token')) {
+      momtvToken = urlParams.get('token');
+      try { localStorage.setItem('momtv_token', momtvToken); } catch (_) {}
+    }
+    function authHeaders(extra = {}) {
+      return momtvToken ? { ...extra, 'X-Auth-Token': momtvToken } : extra;
+    }
+
+    /* ========================================================================
        1. WEB AUDIO API SYNTHESIZER (TACTILE TV AUDIO FEEDBACK)
        ======================================================================== */
     const AudioFeedback = {
@@ -1562,7 +1575,7 @@
 
     async function fetchApps() {
       try {
-        const res = await fetch('/api/apps');
+        const res = await fetch('/api/apps', { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           if (data && Array.isArray(data.apps)) {
@@ -1838,7 +1851,7 @@
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({ cmd: 'kiosk_close' }));
       } else {
-        fetch('/api/kiosk/close', { method: 'POST' }).catch(() => {});
+        fetch('/api/kiosk/close', { method: 'POST', headers: authHeaders() }).catch(() => {});
       }
     }
 
@@ -1865,7 +1878,7 @@
       } else {
         fetch('/api/launch', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ url: target, app: app })
         }).catch(() => {});
       }
@@ -1979,7 +1992,7 @@
 
       showToast('Fetching website preview image...');
       try {
-        const res = await fetch(`/api/app/preview?url=${encodeURIComponent(rawUrl)}`);
+        const res = await fetch(`/api/app/preview?url=${encodeURIComponent(rawUrl)}`, { headers: authHeaders() });
         if (res.ok) {
           const meta = await res.json();
           if (meta.status === 'ok') {
@@ -2037,7 +2050,7 @@
       try {
         const res = await fetch('/api/apps', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(payload)
         });
         if (res.ok) {
@@ -2194,7 +2207,7 @@
 
     function initWebSocket() {
       const host = window.location.hostname || 'localhost';
-      const wsUrl = `ws://${host}:${WS_PORT}`;
+      const wsUrl = momtvToken ? `ws://${host}:${WS_PORT}?token=${encodeURIComponent(momtvToken)}` : `ws://${host}:${WS_PORT}`;
 
       try {
         state.ws = new WebSocket(wsUrl);
@@ -2269,7 +2282,7 @@
 
     async function fetchServerInfo() {
       try {
-        const res = await fetch('/api/info');
+        const res = await fetch('/api/info', { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           state.serverInfo = data;

@@ -2225,6 +2225,19 @@
        ========================================================================== -->
   <script>
     /* --------------------------------------------------------------------------
+       0. MOM TV SECURITY TOKEN PERSISTENCE
+       -------------------------------------------------------------------------- */
+    const urlParams = new URLSearchParams(window.location.search);
+    let momtvToken = urlParams.get('token') || localStorage.getItem('momtv_token') || '';
+    if (urlParams.get('token')) {
+      momtvToken = urlParams.get('token');
+      try { localStorage.setItem('momtv_token', momtvToken); } catch (_) {}
+    }
+    function authHeaders(extra = {}) {
+      return momtvToken ? { ...extra, 'X-Auth-Token': momtvToken } : extra;
+    }
+
+    /* --------------------------------------------------------------------------
        1. HAPTIC FEEDBACK ENGINE (ANDROID VIBRATE + IOS SYNTHETIC CLICK IMPULSE)
        -------------------------------------------------------------------------- */
     let iosAudioCtx = null;
@@ -2320,7 +2333,7 @@
       if (pingInterval) clearInterval(pingInterval);
 
       const host = window.location.hostname || 'localhost';
-      const wsUrl = `ws://${host}:8766`;
+      const wsUrl = momtvToken ? `ws://${host}:8766?token=${encodeURIComponent(momtvToken)}` : `ws://${host}:8766`;
 
       statusBadge.className = 'status-badge reconnecting';
       statusText.textContent = 'Connecting...';
@@ -2396,7 +2409,7 @@
        -------------------------------------------------------------------------- */
     async function fetchRemoteApps() {
       try {
-        const res = await fetch('/api/apps');
+        const res = await fetch('/api/apps', { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           if (data && Array.isArray(data.apps)) {
@@ -2595,7 +2608,7 @@
       send({ cmd: 'kiosk_close' });
       // Reliable fallback via HTTP endpoint in case WebSocket is interrupted
       try {
-        fetch('/api/kiosk/close', { method: 'POST' }).catch(() => {});
+        fetch('/api/kiosk/close', { method: 'POST', headers: authHeaders() }).catch(() => {});
       } catch (e) {}
       showToast('Returned to Windows Desktop', true);
     }
@@ -2827,7 +2840,7 @@
       // Reliable HTTP fallback
       try {
         const encoded = encodeURIComponent(query);
-        fetch(`/api/search?query=${encoded}&destination=${destination}`, { method: 'POST' }).catch(() => {});
+        fetch(`/api/search?query=${encoded}&destination=${destination}`, { method: 'POST', headers: authHeaders() }).catch(() => {});
       } catch (e) {}
 
       const destNames = {

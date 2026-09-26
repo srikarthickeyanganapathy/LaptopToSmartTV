@@ -95,8 +95,10 @@ async def send_and_recv(ws, msg, timeout=5):
             continue
         return data
 
-async def test_websocket_suite(server_proc):
+async def test_websocket_suite(server_proc, token=None):
     uri = f"ws://127.0.0.1:{WS_PORT}"
+    if token:
+        uri += f"?token={token}"
     print(f"\n[WS] Connecting to WebSocket at {uri}...")
     
     async with websockets.connect(uri) as ws:
@@ -166,7 +168,8 @@ async def test_websocket_suite(server_proc):
 
         # Test HTTP fallback endpoint for Kiosk Close: /api/kiosk/close
         try:
-            req = urllib.request.Request(f"http://127.0.0.1:{HTTP_PORT}/api/kiosk/close", method="POST")
+            headers = {"X-Auth-Token": token} if token else {}
+            req = urllib.request.Request(f"http://127.0.0.1:{HTTP_PORT}/api/kiosk/close", method="POST", headers=headers)
             with urllib.request.urlopen(req, timeout=3) as resp_http:
                 data = json.loads(resp_http.read().decode('utf-8'))
                 http_close_ok = data.get("status") == "ok" and data.get("cmd") == "kiosk_close"
@@ -182,9 +185,12 @@ def run_integration():
     app_script = os.path.join(BASE_DIR, "app.py")
     print(f"[HOST] Launching {PYTHON_EXE} {app_script}...")
 
+    test_token = "test_phase4_secret_token"
+    env = {**os.environ, "MOMTV_TOKEN": test_token}
     server_proc = subprocess.Popen(
         [PYTHON_EXE, app_script],
         cwd=BASE_DIR,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -273,7 +279,7 @@ def run_integration():
         record("HTTP Endpoints", "GET /tv-engine.js (Engine with Exit Dialog)", ok_eng, det_eng)
 
         # 3. WebSocket Command Suite
-        asyncio.run(test_websocket_suite(server_proc))
+        asyncio.run(test_websocket_suite(server_proc, token=test_token))
 
     finally:
         print("\n[HOST] Terminating test server process...")
