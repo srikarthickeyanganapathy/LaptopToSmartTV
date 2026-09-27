@@ -8,7 +8,7 @@ import sys
 import ctypes
 from ctypes import wintypes
 import subprocess
-from core.config import VK_MAP
+from core.config import VK_MAP, TEST_MODE
 
 __all__ = [
     "user32",
@@ -65,16 +65,39 @@ class INPUT(ctypes.Structure):
 
 def press_vk(vk_code: int):
     """Press and release a virtual key code."""
-    user32.keybd_event(vk_code, 0, 0, 0)
-    user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+    i_down = INPUT(type=INPUT_KEYBOARD)
+    i_down.ki.wVk = vk_code
+    i_down.ki.wScan = 0
+    i_down.ki.dwFlags = 0
+
+    i_up = INPUT(type=INPUT_KEYBOARD)
+    i_up.ki.wVk = vk_code
+    i_up.ki.wScan = 0
+    i_up.ki.dwFlags = KEYEVENTF_KEYUP
+
+    arr = (INPUT * 2)(i_down, i_up)
+    user32.SendInput(2, arr, ctypes.sizeof(INPUT))
 
 
 def combo(vk_list: list):
     """Press multiple keys simultaneously and release in reverse order."""
+    inputs = []
     for vk in vk_list:
-        user32.keybd_event(vk, 0, 0, 0)
+        i_down = INPUT(type=INPUT_KEYBOARD)
+        i_down.ki.wVk = vk
+        i_down.ki.wScan = 0
+        i_down.ki.dwFlags = 0
+        inputs.append(i_down)
     for vk in reversed(vk_list):
-        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+        i_up = INPUT(type=INPUT_KEYBOARD)
+        i_up.ki.wVk = vk
+        i_up.ki.wScan = 0
+        i_up.ki.dwFlags = KEYEVENTF_KEYUP
+        inputs.append(i_up)
+
+    n = len(inputs)
+    arr = (INPUT * n)(*inputs)
+    user32.SendInput(n, arr, ctypes.sizeof(INPUT))
 
 
 def send_unicode_text(text: str):
@@ -103,15 +126,15 @@ def send_unicode_text(text: str):
         user32.SendInput(n, arr, ctypes.sizeof(INPUT))
     except Exception:
         # Fallback using VkKeyScanW if SendInput encounters platform limits
+        # Note: This fallback only handles Shift modifiers, not AltGr/Ctrl+Alt combos.
         for char in text:
             vk = user32.VkKeyScanW(ord(char))
             vk_code = vk & 0xFF
             shift = bool((vk >> 8) & 1)
             if shift:
-                user32.keybd_event(0x10, 0, 0, 0)
-            press_vk(vk_code)
-            if shift:
-                user32.keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0)
+                combo([0x10, vk_code]) # Use combo for shift
+            else:
+                press_vk(vk_code)
 
 
 def park_cursor():
@@ -136,11 +159,10 @@ def handle_volume(action: str):
 def handle_power(action: str):
     """Handle power and display standby states."""
     act = action.lower()
-    is_test = os.environ.get("MOM_TV_TEST_MODE") == "1"
 
     if act in ("sleep", "standby"):
         print("💤 Triggering Windows Sleep/Standby...")
-        if is_test:
+        if TEST_MODE:
             print("  [TEST MODE] Sleep action simulated (bypassing hardware sleep for automated test)")
             return
         if powrprof and hasattr(powrprof, "SetSuspendState"):
@@ -149,7 +171,7 @@ def handle_power(action: str):
             subprocess.run("rundll32.exe powrprof.dll,SetSuspendState 0,1,0", shell=True)
     elif act in ("screen_off", "display_off", "blank"):
         print("🖥️ Turning off display...")
-        if is_test:
+        if TEST_MODE:
             print("  [TEST MODE] Display off simulated (bypassing display blanking for automated test)")
             return
         # HWND_BROADCAST=0xFFFF, WM_SYSCOMMAND=0x0112, SC_MONITORPOWER=0xF170, 2=Turn Off

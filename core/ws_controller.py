@@ -9,6 +9,8 @@ import json
 import urllib.parse
 import asyncio
 import websockets
+import os
+import hmac
 from core.config import (
     WS_PORT,
     HTTP_PORT,
@@ -64,34 +66,9 @@ SERVER_DEBOUNCE_KEYS = {"up", "down", "left", "right", "ok", "enter", "back"}
 SERVER_DEBOUNCE_INTERVAL_SEC = 0.080  # 80ms responsive debounce
 
 
-def _get_main_loop() -> asyncio.AbstractEventLoop | None:
-    """Safely obtain the active main asyncio event loop."""
-    app_mod = sys.modules.get("app")
-    if app_mod and getattr(app_mod, "MAIN_LOOP", None):
-        return app_mod.MAIN_LOOP
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
+from core.loop_registry import get_loop
 
-
-def _dispatch_press_vk(vk_code: int):
-    """Dynamically resolve press_vk from app facade to respect unittest mocks."""
-    app_mod = sys.modules.get("app")
-    if app_mod and hasattr(app_mod, "press_vk"):
-        app_mod.press_vk(vk_code)
-    else:
-        press_vk(vk_code)
-
-
-def _dispatch_combo(vk_list: list):
-    """Dynamically resolve combo from app facade to respect unittest mocks."""
-    app_mod = sys.modules.get("app")
-    if app_mod and hasattr(app_mod, "combo"):
-        app_mod.combo(vk_list)
-    else:
-        combo(vk_list)
-
+# Tests should monkeypatch core.win32_input directly instead of relying on app facade indirection.
 
 async def broadcast_status(data: dict):
     """Broadcast an event or status dictionary to all connected remotes."""
@@ -106,7 +83,7 @@ async def broadcast_status(data: dict):
 
 def notify_apps_updated():
     """Notify all connected WebSocket clients (TV & remotes) that apps have changed."""
-    loop = _get_main_loop()
+    loop = get_loop()
     if loop and loop.is_running():
         apps = load_all_apps()
         asyncio.run_coroutine_threadsafe(
@@ -114,305 +91,285 @@ def notify_apps_updated():
             loop,
         )
 
+async def _try_cdp_or_fallback(cdp_coro, fallback_fn):
+    """Run CDP coroutine if connected, else run fallback synchronous function."""
+    if cdp_bridge.is_connected:
+        return await cdp_coro
+    else:
+        return fallback_fn()
+
+
+async def _cmd_launch(data: dict, ws=None) -> dict:
+    cmd = "launch"
+    response = {"status": "ok", "cmd": cmd}
+    target = data.get("url") or data.get("app") or data.get("target", "")
+    resolved = APP_SHORTCUTS.get(target.lower(), target)
+
+    if not kiosk_supervisor.is_running:
+        kiosk_supervisor.start(initial_url=resolved)
+        park_cursor()
+        response["target"] = resolved
+        response["method"] = "kiosk_launch"
+        return response
+
+    if resolved.startswith("http://") or resolved.startswith("https://"):
+        success = await cdp_bridge.navigate(resolved)
+        if not success:
+            launch_target(resolved)
+        park_cursor()
+        response["target"] = resolved
+        response["method"] = "cdp_navigate" if success else "fallback_launch"
+    elif resolved.startswith("file:///") or os.path.exists(resolved):
+        os.startfile(resolved)
+        park_cursor()
+        response["target"] = resolved
+        response["method"] = "os_startfile"
+    else:
+        launch_target(resolved)
+        response["target"] = resolved
+        response["method"] = "fallback_launch"
+    return response
+
+async def _cmd_home(data: dict, ws=None) -> dict:
+    cmd = "home"
+    response = {"status": "ok", "cmd": cmd}
+    if not kiosk_supervisor.is_running:
+        kiosk_supervisor.start()
+
+    success = await cdp_bridge.home()
+    if not success:
+        launch_target(TV_URL, is_home=True)
+    park_cursor()
+    response["action"] = "home"
+    response["method"] = "cdp_navigate" if success else "fallback_home"
+    return response
+
+async def _cmd_get_apps(data: dict, ws=None) -> dict:
+    return {"status": "ok", "cmd": "get_apps", "apps": load_all_apps()}
+
+async def _cmd_add_app(data: dict, ws=None) -> dict:
+    app_dict = data.get("app") or data
+    saved = save_custom_app(app_dict)
+    notify_apps_updated()
+    return {"status": "ok", "cmd": "add_app", "result": saved}
+
+async def _cmd_delete_app(data: dict, ws=None) -> dict:
+    app_id = data.get("id") or data.get("app_id", "")
+    deleted = delete_custom_app(app_id)
+    notify_apps_updated()
+    return {"status": "ok", "cmd": "delete_app", "deleted": deleted}
+
+async def _cmd_key(data: dict, ws=None) -> dict:
+    cmd = "key"
+    response = {"status": "ok", "cmd": cmd}
+    k = str(data.get("key", "")).lower()
+    client_id = id(ws) if ws is not None else "global"
+    now = time.monotonic()
+
+    if k in SERVER_DEBOUNCE_KEYS:
+        last_time = CLIENT_LAST_KEY_TIME.get(client_id, 0.0)
+        if (now - last_time) < SERVER_DEBOUNCE_INTERVAL_SEC:
+            response["key"] = k
+            response["handled"] = False
+            response["debounced"] = True
+            return response
+        CLIENT_LAST_KEY_TIME[client_id] = now
+
+    response["key"] = k
+
+    if cdp_bridge.is_connected:
+        handled = await cdp_bridge.dispatch_key(k)
+        response["handled"] = bool(handled)
+        response["method"] = "cdp"
+
+        if not handled and k not in CDP_KEY_MAP:
+            if k in ("reload", "refresh"):
+                await cdp_bridge.reload()
+            elif k in ("zoomin", "zoom_in"):
+                combo([0x11, 0xBB])
+            elif k in ("zoomout", "zoom_out"):
+                combo([0x11, 0xBD])
+            elif k in ("zoomreset", "zoom_reset"):
+                combo([0x11, 0x30])
+            elif k in VK_MAP:
+                press_vk(VK_MAP[k])
+    else:
+        response["handled"] = False
+        response["method"] = "vk_fallback"
+        if k in VK_MAP:
+            press_vk(VK_MAP[k])
+        elif k == "back":
+            combo([0x12, 0x25])
+        elif k == "forward":
+            combo([0x12, 0x27])
+        elif k in ("reload", "refresh"):
+            combo([0x11, 0x52])
+        elif k in ("zoomin", "zoom_in"):
+            combo([0x11, 0xBB])
+        elif k in ("zoomout", "zoom_out"):
+            combo([0x11, 0xBD])
+        elif k in ("zoomreset", "zoom_reset"):
+            combo([0x11, 0x30])
+        elif k in ("rewind", "rewind10", "replay"):
+            press_vk(0x25)
+        elif k in ("forward10", "fastforward", "skip"):
+            press_vk(0x27)
+        elif k in ("playpause", "play_pause", "toggle_play"):
+            press_vk(0xB3)
+
+    if k in ("up", "down", "left", "right", "enter", "ok", "back", "home"):
+        park_cursor()
+
+    return response
+
+async def _cmd_combo(data: dict, ws=None) -> dict:
+    response = {"status": "ok", "cmd": "combo"}
+    keys = data.get("keys", [])
+    vk_list = [VK_MAP.get(str(k).lower(), 0) for k in keys if str(k).lower() in VK_MAP]
+    if vk_list:
+        combo(vk_list)
+        response["keys"] = keys
+    return response
+
+async def _cmd_volume(data: dict, ws=None) -> dict:
+    action = data.get("action") or data.get("direction") or data.get("key", "")
+    handle_volume(action)
+    return {"status": "ok", "cmd": "volume", "volume_action": action}
+
+async def _cmd_power(data: dict, ws=None) -> dict:
+    action = data.get("action") or data.get("state", "sleep")
+    handle_power(action)
+    return {"status": "ok", "cmd": "power", "power_action": action}
+
+async def _cmd_cursor(data: dict, ws=None) -> dict:
+    park_cursor()
+    return {"status": "ok", "cmd": "cursor", "cursor": "parked"}
+
+async def _cmd_kiosk_close(data: dict, ws=None) -> dict:
+    print("💻 [Server] Exit to Windows requested. Stopping Brave Kiosk...")
+    kiosk_supervisor.stop()
+    try:
+        user32.SetCursorPos(500, 500)
+    except Exception as e:
+        print(f"[-] Failed to reposition cursor: {e}")
+    return {"status": "ok", "cmd": "kiosk_close", "message": "Brave Kiosk closed, returned to Windows desktop"}
+
+async def _cmd_search(data: dict, ws=None) -> dict:
+    query = str(data.get("query", "")).strip()
+    destination = str(data.get("destination", "youtube")).lower()
+    encoded = urllib.parse.quote_plus(query)
+
+    if destination in ("hotstar", "disney"):
+        target_url = f"https://www.hotstar.com/in/explore?search_query={encoded}"
+    elif destination in ("web", "google"):
+        target_url = f"https://www.google.com/search?q={encoded}"
+    else:
+        target_url = f"https://www.youtube.com/results?search_query={encoded}"
+
+    if query:
+        if cdp_bridge.is_connected:
+            await cdp_bridge.navigate(target_url)
+        else:
+            launch_target(target_url)
+        park_cursor()
+
+    return {"status": "ok", "cmd": "search", "query": query, "destination": destination, "target": target_url}
+
+async def _cmd_text(data: dict, ws=None) -> dict:
+    val = data.get("value") or data.get("text", "")
+    if cdp_bridge.is_connected:
+        await cdp_bridge.send("Input.insertText", {"text": val}, wait_response=False)
+    send_unicode_text(val)
+    return {"status": "ok", "cmd": "text", "typed_chars": len(val)}
+
+async def _cmd_ping(data: dict, ws=None) -> dict:
+    return {"status": "ok", "cmd": "ping", "pong": True}
+
+async def _cmd_mouse_move(data: dict, ws=None) -> dict:
+    response = {"status": "ok", "cmd": "mouse_move"}
+    try:
+        dx = float(data.get("dx", 0))
+        dy = float(data.get("dy", 0))
+        if cdp_bridge.is_connected:
+            await cdp_bridge.send("Runtime.evaluate", {
+                "expression": f"window.MomTV?.moveCursor?.({dx}, {dy})",
+                "returnByValue": False
+            }, wait_response=False)
+        user32.mouse_event(MOUSEEVENTF_MOVE, int(dx), int(dy), 0, 0)
+        response["dx"] = dx
+        response["dy"] = dy
+    except Exception as e:
+        response["error"] = str(e)
+    return response
+
+async def _cmd_mouse_click(data: dict, ws=None) -> dict:
+    response = {"status": "ok", "cmd": "mouse_click"}
+    try:
+        button = str(data.get("button", "left")).lower()
+        if cdp_bridge.is_connected:
+            await cdp_bridge.send("Runtime.evaluate", {
+                "expression": "window.MomTV?.clickCursor?.()",
+                "returnByValue": False
+            }, wait_response=False)
+        if button == "right":
+            user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+            user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+        else:
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        response["button"] = button
+    except Exception as e:
+        response["error"] = str(e)
+    return response
+
+async def _cmd_mouse_scroll(data: dict, ws=None) -> dict:
+    response = {"status": "ok", "cmd": "mouse_scroll"}
+    try:
+        dy = float(data.get("dy", 0))
+        if cdp_bridge.is_connected:
+            await cdp_bridge.send("Runtime.evaluate", {
+                "expression": f"window.scrollBy(0, {dy})",
+                "returnByValue": False
+            }, wait_response=False)
+        user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(-dy), 0)
+        response["dy"] = dy
+    except Exception as e:
+        response["error"] = str(e)
+    return response
+
+
+COMMAND_HANDLERS = {
+    'launch': _cmd_launch,
+    'home': _cmd_home,
+    'get_apps': _cmd_get_apps,
+    'add_app': _cmd_add_app,
+    'delete_app': _cmd_delete_app,
+    'key': _cmd_key,
+    'combo': _cmd_combo,
+    'volume': _cmd_volume,
+    'power': _cmd_power,
+    'cursor': _cmd_cursor,
+    'park_cursor': _cmd_cursor,
+    'hide_cursor': _cmd_cursor,
+    'kiosk_close': _cmd_kiosk_close,
+    'exit_windows': _cmd_kiosk_close,
+    'close_kiosk': _cmd_kiosk_close,
+    'search': _cmd_search,
+    'text': _cmd_text,
+    'ping': _cmd_ping,
+    'mouse_move': _cmd_mouse_move,
+    'mouse_click': _cmd_mouse_click,
+    'mouse_scroll': _cmd_mouse_scroll,
+}
+
 
 async def handle_websocket_message(data: dict, ws=None) -> dict:
     """Process incoming command packet from phone remote or automation client."""
     cmd = data.get("cmd", "").lower()
-    response = {"status": "ok", "cmd": cmd}
-
-    # ------------------------------------------------------------------
-    # 1. LAUNCH APP / URL (Single-Window CDP Navigation)
-    # ------------------------------------------------------------------
-    if cmd == "launch":
-        target = data.get("url") or data.get("app") or data.get("target", "")
-        resolved = APP_SHORTCUTS.get(target.lower(), target)
-
-        if not kiosk_supervisor.is_running:
-            # Cold start directly with target URL (eliminates race condition)
-            kiosk_supervisor.start(initial_url=resolved)
-            park_cursor()
-            response["target"] = resolved
-            response["method"] = "kiosk_launch"
-            return response
-
-        if resolved.startswith("http://") or resolved.startswith("https://"):
-            # Use CDP Page.navigate on existing kiosk tab (ZERO new windows spawned!)
-            success = await cdp_bridge.navigate(resolved)
-            if not success:
-                # Fallback if CDP is not connected yet
-                launch_target(resolved)
-            park_cursor()
-            response["target"] = resolved
-            response["method"] = "cdp_navigate" if success else "fallback_launch"
-        elif resolved.startswith("file:///") or os.path.exists(resolved):
-            # Local filesystem directory or file
-            os.startfile(resolved)
-            park_cursor()
-            response["target"] = resolved
-            response["method"] = "os_startfile"
-        else:
-            launch_target(resolved)
-            response["target"] = resolved
-            response["method"] = "fallback_launch"
-
-    # ------------------------------------------------------------------
-    # 2. HOME / LAUNCHER (In-place CDP Navigation)
-    # ------------------------------------------------------------------
-    elif cmd == "home":
-        if not kiosk_supervisor.is_running:
-            kiosk_supervisor.start()
-
-        success = await cdp_bridge.home()
-        if not success:
-            launch_target(TV_URL, is_home=True)
-        park_cursor()
-        response["action"] = "home"
-        response["method"] = "cdp_navigate" if success else "fallback_home"
-
-    # ------------------------------------------------------------------
-    # 2b. DYNAMIC APPS MANAGEMENT (WebSocket)
-    # ------------------------------------------------------------------
-    elif cmd == "get_apps":
-        response["apps"] = load_all_apps()
-
-    elif cmd == "add_app":
-        app_dict = data.get("app") or data
-        saved = save_custom_app(app_dict)
-        notify_apps_updated()
-        response["result"] = saved
-
-    elif cmd == "delete_app":
-        app_id = data.get("id") or data.get("app_id", "")
-        deleted = delete_custom_app(app_id)
-        notify_apps_updated()
-        response["deleted"] = deleted
-
-    # ------------------------------------------------------------------
-    # 3. KEY INPUT (Dual-Layer: CDP DOM/Engine + Hardware Win32 Fallback)
-    # ------------------------------------------------------------------
-    elif cmd == "key":
-        k = str(data.get("key", "")).lower()
-        client_id = id(ws) if ws is not None else "global"
-        now = time.monotonic()
-
-        # Server-side timestamp debounce (120ms) on directional/discrete keys per client session
-        # Guarantees that duplicate network packets never trigger double moves
-        if k in SERVER_DEBOUNCE_KEYS:
-            last_time = CLIENT_LAST_KEY_TIME.get(client_id, 0.0)
-            if (now - last_time) < SERVER_DEBOUNCE_INTERVAL_SEC:
-                response["key"] = k
-                response["handled"] = False
-                response["debounced"] = True
-                return response
-            CLIENT_LAST_KEY_TIME[client_id] = now
-
-        response["key"] = k
-
-        # Step 1: Send via CDP Bridge if active/connected
-        # When CDP is connected and handled/attempted the key, DO NOT call press_vk!
-        if cdp_bridge.is_connected:
-            handled = await cdp_bridge.dispatch_key(k)
-            response["handled"] = bool(handled)
-            response["method"] = "cdp"
-
-            # Browser commands not covered by direct CDP key dispatch
-            if not handled and k not in CDP_KEY_MAP:
-                if k in ("reload", "refresh"):
-                    await cdp_bridge.reload()
-                elif k in ("zoomin", "zoom_in"):
-                    _dispatch_combo([0x11, 0xBB])  # Ctrl + = (+)
-                elif k in ("zoomout", "zoom_out"):
-                    _dispatch_combo([0x11, 0xBD])  # Ctrl + -
-                elif k in ("zoomreset", "zoom_reset"):
-                    _dispatch_combo([0x11, 0x30])  # Ctrl + 0
-                elif k in VK_MAP:
-                    _dispatch_press_vk(VK_MAP[k])
-        else:
-            # Step 2: Hardware Fallback ONLY if CDP is completely offline/disconnected
-            response["handled"] = False
-            response["method"] = "vk_fallback"
-            if k in VK_MAP:
-                _dispatch_press_vk(VK_MAP[k])
-            elif k == "back":
-                _dispatch_combo([0x12, 0x25])  # Alt + Left (Hardware Browser Back)
-            elif k == "forward":
-                _dispatch_combo([0x12, 0x27])  # Alt + Right
-            elif k in ("reload", "refresh"):
-                _dispatch_combo([0x11, 0x52])  # Ctrl + R
-            elif k in ("zoomin", "zoom_in"):
-                _dispatch_combo([0x11, 0xBB])  # Ctrl + = (+)
-            elif k in ("zoomout", "zoom_out"):
-                _dispatch_combo([0x11, 0xBD])  # Ctrl + -
-            elif k in ("zoomreset", "zoom_reset"):
-                _dispatch_combo([0x11, 0x30])  # Ctrl + 0
-            elif k in ("rewind", "rewind10", "replay"):
-                _dispatch_press_vk(0x25)  # Left arrow
-            elif k in ("forward10", "fastforward", "skip"):
-                _dispatch_press_vk(0x27)  # Right arrow
-            elif k in ("playpause", "play_pause", "toggle_play"):
-                _dispatch_press_vk(0xB3)  # VK_MEDIA_PLAY_PAUSE
-
-        # Automatically park mouse cursor off screen for dpad navigation
-        if k in ("up", "down", "left", "right", "enter", "ok", "back", "home"):
-            park_cursor()
-
-    # ------------------------------------------------------------------
-    # 4. CUSTOM COMBO
-    # ------------------------------------------------------------------
-    elif cmd == "combo":
-        keys = data.get("keys", [])
-        vk_list = [VK_MAP.get(str(k).lower(), 0) for k in keys if str(k).lower() in VK_MAP]
-        if vk_list:
-            _dispatch_combo(vk_list)
-            response["keys"] = keys
-
-    # ------------------------------------------------------------------
-    # 5. HARDWARE VOLUME CONTROLS (Win32 API)
-    # ------------------------------------------------------------------
-    elif cmd == "volume":
-        action = data.get("action") or data.get("direction") or data.get("key", "")
-        handle_volume(action)
-        response["volume_action"] = action
-
-    # ------------------------------------------------------------------
-    # 6. HARDWARE POWER & DISPLAY STANDBY (Win32 API)
-    # ------------------------------------------------------------------
-    elif cmd == "power":
-        action = data.get("action") or data.get("state", "sleep")
-        handle_power(action)
-        response["power_action"] = action
-
-    # ------------------------------------------------------------------
-    # 7. CURSOR PARKING
-    # ------------------------------------------------------------------
-    elif cmd in ("cursor", "park_cursor", "hide_cursor"):
-        park_cursor()
-        response["cursor"] = "parked"
-
-    # ------------------------------------------------------------------
-    # 7b. KIOSK CLOSE (Exit to Windows Desktop)
-    # ------------------------------------------------------------------
-    elif cmd in ("kiosk_close", "exit_windows", "close_kiosk"):
-        print("💻 [Server] Exit to Windows requested. Stopping Brave Kiosk...")
-        kiosk_supervisor.stop()
-        try:
-            user32.SetCursorPos(500, 500)
-        except Exception as e:
-            print(f"[-] Failed to reposition cursor: {e}")
-        response["cmd"] = "kiosk_close"
-        response["message"] = "Brave Kiosk closed, returned to Windows desktop"
-        response["status"] = "ok"
-
-    # ------------------------------------------------------------------
-    # 7c. UNIVERSAL SEARCH (YouTube / Hotstar / Google Web)
-    # ------------------------------------------------------------------
-    elif cmd == "search":
-        query = str(data.get("query", "")).strip()
-        destination = str(data.get("destination", "youtube")).lower()
-        encoded = urllib.parse.quote_plus(query)
-
-        if destination in ("hotstar", "disney"):
-            target_url = f"https://www.hotstar.com/in/explore?search_query={encoded}"
-        elif destination in ("web", "google"):
-            target_url = f"https://www.google.com/search?q={encoded}"
-        else:  # default youtube
-            target_url = f"https://www.youtube.com/results?search_query={encoded}"
-
-        if query:
-            if cdp_bridge.is_connected:
-                await cdp_bridge.navigate(target_url)
-            else:
-                launch_target(target_url)
-            park_cursor()
-
-        response["cmd"] = "search"
-        response["query"] = query
-        response["destination"] = destination
-        response["target"] = target_url
-        response["status"] = "ok"
-
-    # ------------------------------------------------------------------
-    # 8. TEXT ENTRY
-    # ------------------------------------------------------------------
-    elif cmd == "text":
-        val = data.get("value") or data.get("text", "")
-        # Dispatch text into DOM via CDP if active
-        if cdp_bridge.is_connected:
-            await cdp_bridge.send("Input.insertText", {"text": val}, wait_response=False)
-        send_unicode_text(val)
-        response["typed_chars"] = len(val)
-
-    # ------------------------------------------------------------------
-    # 9. PING / KEEP-ALIVE
-    # ------------------------------------------------------------------
-    elif cmd == "ping":
-        response["pong"] = True
-
-    # ------------------------------------------------------------------
-    # 10. MOUSE MOVEMENT (Magic Trackpad / Cursor Sync)
-    # ------------------------------------------------------------------
-    elif cmd == "mouse_move":
-        try:
-            dx = float(data.get("dx", 0))
-            dy = float(data.get("dy", 0))
-            # 1. Execute via CDP
-            if cdp_bridge.is_connected:
-                await cdp_bridge.send("Runtime.evaluate", {
-                    "expression": f"window.MomTV?.moveCursor?.({dx}, {dy})",
-                    "returnByValue": False
-                }, wait_response=False)
-            # 2. Dispatch Windows mouse_event (0x0001 = MOUSEEVENTF_MOVE)
-            user32.mouse_event(MOUSEEVENTF_MOVE, int(dx), int(dy), 0, 0)
-            response["dx"] = dx
-            response["dy"] = dy
-        except Exception as e:
-            response["error"] = str(e)
-
-    # ------------------------------------------------------------------
-    # 11. MOUSE CLICK (Magic Trackpad / Cursor Click)
-    # ------------------------------------------------------------------
-    elif cmd == "mouse_click":
-        try:
-            button = str(data.get("button", "left")).lower()
-            # 1. Execute via CDP
-            if cdp_bridge.is_connected:
-                await cdp_bridge.send("Runtime.evaluate", {
-                    "expression": "window.MomTV?.clickCursor?.()",
-                    "returnByValue": False
-                }, wait_response=False)
-            # 2. Dispatch Windows mouse_event for left click (0x02 | 0x04) or right click (0x08 | 0x10)
-            if button == "right":
-                user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-            else:
-                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            response["button"] = button
-        except Exception as e:
-            response["error"] = str(e)
-
-    # ------------------------------------------------------------------
-    # 12. MOUSE SCROLL (Magic Trackpad / Two-Finger / Scroll Strip)
-    # ------------------------------------------------------------------
-    elif cmd == "mouse_scroll":
-        try:
-            dy = float(data.get("dy", 0))
-            # 1. Execute via CDP: window.scrollBy(0, dy)
-            if cdp_bridge.is_connected:
-                await cdp_bridge.send("Runtime.evaluate", {
-                    "expression": f"window.scrollBy(0, {dy})",
-                    "returnByValue": False
-                }, wait_response=False)
-            # 2. Dispatch Windows mouse_event (0x0800 = MOUSEEVENTF_WHEEL, -dy in Windows convention)
-            user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(-dy), 0)
-            response["dy"] = dy
-        except Exception as e:
-            response["error"] = str(e)
-
-    else:
-        response["status"] = "unknown_cmd"
-
-    return response
+    handler = COMMAND_HANDLERS.get(cmd)
+    if handler:
+        return await handler(data, ws)
+    return {"status": "unknown_cmd", "cmd": cmd}
 
 
 def _is_ws_origin_allowed(ws) -> bool:
@@ -440,10 +397,12 @@ def _is_ws_token_valid(ws, data: dict = None) -> bool:
             parsed = urllib.parse.urlsplit(req.path)
             q = urllib.parse.parse_qs(parsed.query)
             token = q.get("token", [""])[0]
-            if token and token == AUTH_TOKEN:
+            if token and hmac.compare_digest(token, AUTH_TOKEN):
                 return True
         if data and isinstance(data, dict):
-            if data.get("token") == AUTH_TOKEN or data.get("auth") == AUTH_TOKEN:
+            t1 = data.get("token", "")
+            t2 = data.get("auth", "")
+            if hmac.compare_digest(str(t1), AUTH_TOKEN) or hmac.compare_digest(str(t2), AUTH_TOKEN):
                 return True
     except Exception:
         pass

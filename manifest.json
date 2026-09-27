@@ -5,7 +5,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "display_override": ["standalone", "fullscreen"],
+  "orientation": "natural",
   "theme_color": "#090a0f",
   "background_color": "#090a0f",
   "icons": [
@@ -13,7 +14,13 @@
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     },
     {
       "src": "/icon-192.png",
@@ -29,6 +36,16 @@
     }
   ],
   "categories": ["entertainment", "utilities"],
+  "share_target": {
+    "action": "/api/search",
+    "method": "POST",
+    "enctype": "application/json",
+    "params": {
+      "title": "query",
+      "text": "query",
+      "url": "url"
+    }
+  },
   "shortcuts": [
     {
       "name": "TV Home",

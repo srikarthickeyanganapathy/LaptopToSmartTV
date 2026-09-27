@@ -3,6 +3,7 @@
    Zero-flicker instant launch & offline cache for luxury standalone PWA
    ============================================================================== */
 
+// CACHE_NAME should be tied to app build hash for production
 const CACHE_NAME = "mom-tv-remote-v2.0.1";
 const PRECACHE_ASSETS = [
   "/",
@@ -10,8 +11,8 @@ const PRECACHE_ASSETS = [
   "/index.html",
   "/manifest.json",
   "/icon.svg",
-  "/icon-192.png",
-  "/icon-512.png"
+  "/icon-192.png", // NOTE: Should be generated from icon.svg at build time
+  "/icon-512.png"  // NOTE: Should be generated from icon.svg at build time
 ];
 
 // Install: Pre-cache core UI shell and activate immediately
@@ -48,6 +49,14 @@ self.addEventListener("activate", (event) => {
           })
       );
     }).then(() => self.clients.claim())
+    .then(() => {
+      // Notify all clients that a new version is available
+      return self.clients.matchAll({type: 'window'}).then(clients => {
+        clients.forEach(client => {
+          client.postMessage({ type: 'SW_UPDATED', version: CACHE_NAME });
+        });
+      });
+    })
   );
 });
 
@@ -108,7 +117,10 @@ self.addEventListener("fetch", (event) => {
           }
           return networkResponse;
         })
-        .catch(() => cachedResponse);
+        .catch(() => cachedResponse || new Response(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text x="10" y="50" fill="#888">Offline</text></svg>',
+          { headers: { 'Content-Type': 'image/svg+xml' } }
+        ));
 
       return cachedResponse || fetchPromise;
     })

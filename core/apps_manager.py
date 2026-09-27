@@ -30,8 +30,7 @@ __all__ = [
 ]
 
 # Thread safety lock for apps.json and APP_SHORTCUTS.
-# Must be RLock because delete_custom_app() and save_custom_app() call load_all_apps() while holding the lock.
-_APPS_LOCK = threading.RLock()
+_APPS_LOCK = threading.Lock()
 
 # Core System Shortcuts mapping
 CORE_SHORTCUTS = {
@@ -45,9 +44,23 @@ RESERVED_SHORTCUTS = set(CORE_SHORTCUTS.keys())
 APP_SHORTCUTS = dict(CORE_SHORTCUTS)
 
 
+def _rebuild_shortcuts_from(apps: list[dict]):
+    """Rebuild APP_SHORTCUTS from a list of apps."""
+    APP_SHORTCUTS.clear()
+    APP_SHORTCUTS.update(CORE_SHORTCUTS)
+    for item in apps:
+        if not item.get("url"):
+            continue
+        for key_candidate in [item.get("id"), item.get("app"), item.get("name")]:
+            if key_candidate:
+                kc = str(key_candidate).strip().lower()
+                if kc and kc not in RESERVED_SHORTCUTS:
+                    APP_SHORTCUTS[kc] = item["url"]
+
+
 def _atomic_write_apps(custom_data: list | dict) -> bool:
     """Safely write apps catalog using atomic file replacement (caller must hold _APPS_LOCK)."""
-    tmp_file = f"{CUSTOM_APPS_FILE}.tmp.{os.getpid()}_{int(time.time() * 1000)}"
+    tmp_file = f"{CUSTOM_APPS_FILE}.tmp.{os.getpid()}_{threading.get_ident()}_{int(time.time() * 1000)}"
     try:
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(custom_data, f, indent=2)
@@ -66,10 +79,6 @@ def _atomic_write_apps(custom_data: list | dict) -> bool:
 def load_all_apps() -> list[dict]:
     """Load default app (YouTube TV) combined with custom user apps from apps.json."""
     with _APPS_LOCK:
-        # Reset shortcuts in-place to core defaults before rebuilding (fixes stale shortcut bug)
-        APP_SHORTCUTS.clear()
-        APP_SHORTCUTS.update(CORE_SHORTCUTS)
-
         apps = [dict(a) for a in DEFAULT_APPS]
         seen_ids = {a["id"].lower() for a in DEFAULT_APPS}
         seen_urls = {a["url"].rstrip("/").lower() for a in DEFAULT_APPS}
@@ -89,12 +98,6 @@ def load_all_apps() -> list[dict]:
                                 if item_id:
                                     seen_ids.add(item_id)
                                 seen_urls.add(item_url)
-                                # Register shortcut (guard against reserved keys)
-                                for key_candidate in [item.get("id"), item.get("app"), item.get("name")]:
-                                    if key_candidate:
-                                        kc = str(key_candidate).strip().lower()
-                                        if kc and kc not in RESERVED_SHORTCUTS:
-                                            APP_SHORTCUTS[kc] = item["url"]
                     elif isinstance(data, dict):
                         for k, v in data.items():
                             k_lower = k.lower()
@@ -117,8 +120,6 @@ def load_all_apps() -> list[dict]:
                                 })
                                 seen_ids.add(k_lower)
                                 seen_urls.add(v_url)
-                                if k_lower not in RESERVED_SHORTCUTS:
-                                    APP_SHORTCUTS[k_lower] = v
                             elif isinstance(v, dict) and v.get("url"):
                                 v_url = str(v["url"]).rstrip("/").lower()
                                 if k_lower in seen_ids or v_url in seen_urls:
@@ -131,18 +132,34 @@ def load_all_apps() -> list[dict]:
                                 apps.append(item_entry)
                                 seen_ids.add(k_lower)
                                 seen_urls.add(v_url)
-                                for key_candidate in [item_entry.get("id"), item_entry.get("app"), item_entry.get("name")]:
-                                    if key_candidate:
-                                        kc = str(key_candidate).strip().lower()
-                                        if kc and kc not in RESERVED_SHORTCUTS:
-                                            APP_SHORTCUTS[kc] = item_entry["url"]
             except Exception as e:
                 print(f"[-] Error reading apps.json: {e}")
+        
+        _rebuild_shortcuts_from(apps)
         return apps
+
+
+def _levenshtein_lite(s1: str, s2: str) -> int:
+    if len(s1) < len(s2):
+        return _levenshtein_lite(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
 
 
 def save_custom_app(app_data: dict) -> dict:
     """Save a user-defined custom website app to apps.json with thread-safety and reserved key guards."""
+    import colorsys
+    
     raw_url = str(app_data.get("url", "")).strip()
     if not raw_url:
         return {"status": "error", "message": "URL is required"}
@@ -150,8 +167,8 @@ def save_custom_app(app_data: dict) -> dict:
         raw_url = "https://" + raw_url
 
     raw_name = str(app_data.get("name", "")).strip()
+    parsed_url = urllib.parse.urlparse(raw_url)
     if not raw_name:
-        parsed_url = urllib.parse.urlparse(raw_url)
         raw_name = parsed_url.netloc.replace("www.", "").capitalize()
 
     app_id = str(app_data.get("id") or ("custom_" + str(int(time.time()))))
@@ -165,6 +182,13 @@ def save_custom_app(app_data: dict) -> dict:
     ):
         return {"status": "error", "message": f"App ID, name or slug '{app_id}' is reserved by the system"}
 
+    accent = app_data.get("accent")
+    if not accent or accent == "#00D4FF":
+        domain = parsed_url.netloc.replace("www.", "")
+        hue = hash(domain) % 360
+        rgb = colorsys.hls_to_rgb(hue/360.0, 0.55, 0.8)
+        accent = f"#{int(rgb[0]*255):02x}{int(rgb[1]*255):02x}{int(rgb[2]*255):02x}"
+
     new_app = {
         "id": app_id,
         "name": raw_name,
@@ -174,11 +198,18 @@ def save_custom_app(app_data: dict) -> dict:
         "icon": app_data.get("icon") or "",
         "category": app_data.get("category", "Custom Web"),
         "description": app_data.get("description", f"Web App for {raw_name}"),
-        "accent": app_data.get("accent", "#00D4FF"),
+        "accent": accent,
         "glow": app_data.get("glow", "rgba(0, 212, 255, 0.4)"),
         "custom": True,
         "is_custom": True,
     }
+    
+    if "lastLaunched" in app_data:
+        new_app["lastLaunched"] = app_data["lastLaunched"]
+    if "pinned" in app_data:
+        new_app["pinned"] = app_data["pinned"]
+
+    warning = None
 
     with _APPS_LOCK:
         custom_list = []
@@ -195,15 +226,28 @@ def save_custom_app(app_data: dict) -> dict:
             except Exception as e:
                 print(f"[-] Warning reading apps.json during save: {e}")
 
+        # Check for duplicate url warning
+        new_host = parsed_url.hostname or ""
+        if new_host:
+            for existing in custom_list:
+                ex_host = urllib.parse.urlparse(existing.get("url", "")).hostname or ""
+                if ex_host and _levenshtein_lite(ex_host, new_host) <= 2:
+                    warning = f"URL hostname is very similar to existing app '{existing.get('name')}'"
+                    break
+
         custom_list.append(new_app)
         if not _atomic_write_apps(custom_list):
             return {"status": "error", "message": "Failed to write apps.json"}
 
         # Refresh shortcut dictionary and active app catalog cleanly
-        load_all_apps()
+        apps = [dict(a) for a in DEFAULT_APPS] + custom_list
+        _rebuild_shortcuts_from(apps)
 
     print(f"✨ [Apps Manager] Saved custom website: {raw_name} ({raw_url})")
-    return {"status": "ok", "app": new_app}
+    res = {"status": "ok", "app": new_app}
+    if warning:
+        res["warning"] = warning
+    return res
 
 
 def delete_custom_app(app_id: str) -> bool:
@@ -244,7 +288,19 @@ def delete_custom_app(app_id: str) -> bool:
 
             if deleted:
                 # Rebuild shortcuts & catalog cleanly
-                load_all_apps()
+                apps_list = [dict(a) for a in DEFAULT_APPS]
+                if isinstance(data, list):
+                    apps_list.extend(new_list)
+                else:
+                    for k, v in data.items():
+                        if isinstance(v, str):
+                            apps_list.append({"id": k, "app": k, "url": v})
+                        elif isinstance(v, dict) and v.get("url"):
+                            item_entry = dict(v)
+                            item_entry.setdefault("id", k)
+                            item_entry.setdefault("app", k)
+                            apps_list.append(item_entry)
+                _rebuild_shortcuts_from(apps_list)
                 return True
 
             return False
@@ -258,6 +314,30 @@ def delete_custom_app(app_id: str) -> bool:
 # ==============================================================================
 
 ALLOWED_PORTS = {80, 443, 8080, 8443}
+
+
+def _is_6to4_unsafe(ip: ipaddress.IPv6Address) -> bool:
+    if ip in ipaddress.IPv6Network("2002::/16"):
+        if ip.sixtofour and not is_safe_ip(ip.sixtofour):
+            return True
+    return False
+
+
+def _is_teredo_unsafe(ip: ipaddress.IPv6Address) -> bool:
+    if ip in ipaddress.IPv6Network("2001::/32"):
+        if ip.teredo and not is_safe_ip(ip.teredo[1]):
+            return True
+    return False
+
+
+def _is_mapped_v4_unsafe(ip: ipaddress.IPv6Address) -> bool:
+    if ip.ipv4_mapped and not is_safe_ip(ip.ipv4_mapped):
+        return True
+    if ip in ipaddress.IPv6Network("::/96"):
+        v4 = ipaddress.IPv4Address(ip.packed[-4:])
+        if not is_safe_ip(v4):
+            return True
+    return False
 
 
 def is_safe_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -276,21 +356,12 @@ def is_safe_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
     # Check IPv6 encapsulated / mapped IPv4 addresses
     if isinstance(ip, ipaddress.IPv6Address):
-        if ip.ipv4_mapped and not is_safe_ip(ip.ipv4_mapped):
+        if _is_mapped_v4_unsafe(ip):
             return False
-        # IPv4-compatible IPv6 (::/96)
-        if ip in ipaddress.IPv6Network("::/96"):
-            v4 = ipaddress.IPv4Address(ip.packed[-4:])
-            if not is_safe_ip(v4):
-                return False
-        # 6to4 encapsulation (2002::/16)
-        if ip in ipaddress.IPv6Network("2002::/16"):
-            if ip.sixtofour and not is_safe_ip(ip.sixtofour):
-                return False
-        # Teredo tunneling (2001::/32)
-        if ip in ipaddress.IPv6Network("2001::/32"):
-            if ip.teredo and not is_safe_ip(ip.teredo[1]):
-                return False
+        if _is_6to4_unsafe(ip):
+            return False
+        if _is_teredo_unsafe(ip):
+            return False
 
     return True
 
@@ -533,9 +604,12 @@ def extract_website_metadata(url: str) -> dict:
         poster = urllib.parse.urljoin(final_url, poster)
     if icon:
         icon = urllib.parse.urljoin(final_url, icon)
+        favicon_url = icon
     else:
         parsed_final = urllib.parse.urlsplit(final_url)
-        icon = f"{parsed_final.scheme}://{parsed_final.netloc}/favicon.ico"
+        domain = parsed_final.hostname or ""
+        favicon_url = f"{parsed_final.scheme}://{parsed_final.netloc}/favicon.ico"
+        icon = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
 
     if not poster:
         poster = icon
@@ -547,7 +621,7 @@ def extract_website_metadata(url: str) -> dict:
         "url": final_url,
         "poster": poster,
         "icon": icon,
-        "favicon": icon,
+        "favicon": favicon_url,
         "description": desc or f"Browse {title}",
     }
 

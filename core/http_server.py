@@ -11,6 +11,8 @@ import time
 import json
 import urllib.parse
 import asyncio
+import logging
+import hmac
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from core.config import (
     HTTP_PORT,
@@ -23,6 +25,8 @@ from core.config import (
     ALLOWED_STATIC_DIRS,
     TV_URL,
 )
+from core.auth import compare_token, extract_token_from_headers
+from core.loop_registry import get_loop
 from core.win32_input import user32, park_cursor
 from core.apps_manager import (
     APP_SHORTCUTS,
@@ -43,9 +47,13 @@ __all__ = [
     "start_http_server",
 ]
 
+logger = logging.getLogger(__name__)
+START_TIME = time.time()
+_RATE_LIMITS = {}
 
-def _get_main_loop() -> asyncio.AbstractEventLoop | None:
-    """Safely obtain the active main asyncio event loop."""
+
+def _get_main_loop():
+    # Helper backward compat
     app_mod = sys.modules.get("app")
     if app_mod and getattr(app_mod, "MAIN_LOOP", None):
         return app_mod.MAIN_LOOP
@@ -53,7 +61,6 @@ def _get_main_loop() -> asyncio.AbstractEventLoop | None:
         return asyncio.get_running_loop()
     except RuntimeError:
         return None
-
 
 class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
     """Custom HTTP Handler serving Remote, TV Launcher, tv-engine.js, PWA assets & APIs."""
@@ -81,37 +88,21 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
     def _verify_token(self, body_json: dict = None) -> bool:
         """Verify presence of valid session AUTH_TOKEN."""
-        # 1. Header: X-Auth-Token
-        token_hdr = self.headers.get("X-Auth-Token")
-        if token_hdr and token_hdr.strip() == AUTH_TOKEN:
+        token = extract_token_from_headers(dict(self.headers))
+        if token and hmac.compare_digest(token, AUTH_TOKEN):
             return True
-
-        # 2. Header: Authorization: Bearer <token>
-        auth_hdr = self.headers.get("Authorization", "")
-        if auth_hdr.startswith("Bearer "):
-            bearer = auth_hdr.split("Bearer ", 1)[1].strip()
-            if bearer == AUTH_TOKEN:
-                return True
-
-        # 3. Cookie: momtv_token=<token>
-        cookie_hdr = self.headers.get("Cookie", "")
-        if cookie_hdr:
-            for item in cookie_hdr.split(";"):
-                parts = item.strip().split("=", 1)
-                if len(parts) == 2 and parts[0] == "momtv_token" and parts[1] == AUTH_TOKEN:
-                    return True
 
         # 4. Query param ?token=
         parsed = urllib.parse.urlparse(self.path)
         q_params = urllib.parse.parse_qs(parsed.query)
         token_q = q_params.get("token", [""])[0]
-        if token_q and token_q.strip() == AUTH_TOKEN:
+        if token_q and hmac.compare_digest(token_q.strip(), AUTH_TOKEN):
             return True
 
         # 5. In JSON body
         if body_json and isinstance(body_json, dict):
             token_b = body_json.get("token")
-            if token_b and str(token_b).strip() == AUTH_TOKEN:
+            if token_b and hmac.compare_digest(str(token_b).strip(), AUTH_TOKEN):
                 return True
 
         return False
@@ -137,8 +128,8 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
     def _resolve_static_path(self, raw_path: str) -> str | None:
         """
-        Safely resolve a request path to an absolute filesystem path within ALLOWED_STATIC_FILES / ALLOWED_STATIC_DIRS.
-        Returns the absolute canonical path if valid, permitted, and existing on disk, else None.
+        NOTE: This method is currently unused but kept as a utility;
+        the actual static serving in _handle_get reimplements similar logic inline.
         """
         try:
             clean_path = raw_path.split("?", 1)[0].split("#", 1)[0]
@@ -241,120 +232,34 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b'{"status": "error", "message": "Unauthorized: valid AUTH_TOKEN required"}')
                 return
 
-            # POST /api/apps or /api/apps/add
-            if path in ("/api/apps", "/api/apps/add"):
-                res = save_custom_app(body_json)
-                if res.get("status") == "ok":
-                    notify_apps_updated()
-                status_code = 200 if res.get("status") == "ok" else 400
-                body = json.dumps(res, indent=2).encode("utf-8")
-                self.send_response(status_code)
-                self.end_headers_with_cors("application/json; charset=utf-8")
-                self.wfile.write(body)
-                return
-
-            # POST /api/app/preview
-            if path in ("/api/app/preview", "/api/preview"):
-                target_url = body_json.get("url") or body_json.get("target", "")
-                res = extract_website_metadata(target_url)
-                status_code = 200 if res.get("status") == "ok" else 400
-                body = json.dumps(res, indent=2).encode("utf-8")
-                self.send_response(status_code)
-                self.end_headers_with_cors("application/json; charset=utf-8")
-                self.wfile.write(body)
-                return
-
-            # POST /api/launch
-            if path in ("/api/launch", "/api/open"):
-                target = body_json.get("url") or body_json.get("app") or body_json.get("target", "")
-                resolved = APP_SHORTCUTS.get(target.lower(), target)
-
-                if not kiosk_supervisor.is_running:
-                    # Cold start: launch Brave kiosk directly with target URL (eliminates race condition)
-                    kiosk_supervisor.start(initial_url=resolved)
-                    park_cursor()
-                    res = {"status": "ok", "target": resolved, "method": "kiosk_launch"}
-                    body = json.dumps(res, indent=2).encode("utf-8")
-                    self.send_response(200)
+            client_ip = self.client_address[0]
+            now = time.time()
+            if path in ("/api/launch", "/api/open", "/api/search", "/api/kiosk/close", "/api/kiosk_close", "/api/exit"):
+                if client_ip not in _RATE_LIMITS:
+                    _RATE_LIMITS[client_ip] = []
+                _RATE_LIMITS[client_ip] = [t for t in _RATE_LIMITS[client_ip] if now - t < 60]
+                if len(_RATE_LIMITS[client_ip]) >= 10:
+                    self.send_response(429)
                     self.end_headers_with_cors("application/json; charset=utf-8")
-                    self.wfile.write(body)
+                    self.wfile.write(b'{"status": "error", "message": "Too many requests"}')
                     return
+                _RATE_LIMITS[client_ip].append(now)
 
-                loop = _get_main_loop()
-                success = False
-                if loop and loop.is_running():
-                    future = asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), loop)
-                    try:
-                        success = future.result(timeout=6.0)
-                    except Exception:
-                        success = False
-
-                if not success:
-                    launch_target(resolved)
-                park_cursor()
-
-                res = {"status": "ok", "target": resolved, "method": "cdp" if success else "fallback"}
-                body = json.dumps(res, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.end_headers_with_cors("application/json; charset=utf-8")
-                self.wfile.write(body)
-                return
-
-            # POST /api/kiosk/close
-            if path in ("/api/kiosk/close", "/api/kiosk_close", "/api/exit"):
-                print("💻 [HTTP API] Exit to Windows requested. Stopping Brave Kiosk...")
-                kiosk_supervisor.stop()
-                try:
-                    user32.SetCursorPos(500, 500)
-                except Exception:
-                    pass
-                payload = {
-                    "status": "ok",
-                    "cmd": "kiosk_close",
-                    "message": "Brave Kiosk closed, returned to Windows desktop",
-                }
-                body = json.dumps(payload, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.end_headers_with_cors("application/json; charset=utf-8")
-                self.wfile.write(body)
-                return
-
-            # POST /api/search
-            if path == "/api/search":
-                q_params = urllib.parse.parse_qs(parsed.query)
-                query = body_json.get("query") or body_json.get("q") or q_params.get("q", [""])[0] or q_params.get("query", [""])[0]
-                destination = (body_json.get("destination") or q_params.get("destination", ["youtube"])[0] or "youtube").lower()
-                encoded = urllib.parse.quote_plus(str(query).strip())
-
-                if destination in ("hotstar", "disney"):
-                    target_url = f"https://www.hotstar.com/in/explore?search_query={encoded}"
-                elif destination in ("web", "google"):
-                    target_url = f"https://www.google.com/search?q={encoded}"
-                else:
-                    target_url = f"https://www.youtube.com/results?search_query={encoded}"
-
-                if query:
-                    loop = _get_main_loop()
-                    if kiosk_supervisor.is_running and loop and loop.is_running():
-                        try:
-                            asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(target_url), loop)
-                        except Exception:
-                            launch_target(target_url)
-                    else:
-                        launch_target(target_url)
-                    park_cursor()
-
-                payload = {
-                    "status": "ok",
-                    "cmd": "search",
-                    "query": query,
-                    "destination": destination,
-                    "target": target_url,
-                }
-                body = json.dumps(payload, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.end_headers_with_cors("application/json; charset=utf-8")
-                self.wfile.write(body)
+            handlers = {
+                "/api/apps": self._post_apps,
+                "/api/apps/add": self._post_apps,
+                "/api/app/preview": self._post_preview,
+                "/api/preview": self._post_preview,
+                "/api/launch": self._post_launch,
+                "/api/open": self._post_launch,
+                "/api/kiosk/close": self._post_kiosk_close,
+                "/api/kiosk_close": self._post_kiosk_close,
+                "/api/exit": self._post_kiosk_close,
+                "/api/search": self._post_search,
+            }
+            handler = handlers.get(path)
+            if handler:
+                handler(body_json, parsed)
                 return
 
             # Unknown API endpoint
@@ -365,6 +270,112 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
             pass
         except Exception as e:
             print(f"[-] HTTP POST exception: {e}")
+
+    def _post_apps(self, body_json, parsed):
+        res = save_custom_app(body_json)
+        if res.get("status") == "ok":
+            notify_apps_updated()
+        status_code = 200 if res.get("status") == "ok" else 400
+        body = json.dumps(res, indent=2).encode("utf-8")
+        self.send_response(status_code)
+        self.end_headers_with_cors("application/json; charset=utf-8")
+        self.wfile.write(body)
+
+    def _post_preview(self, body_json, parsed):
+        target_url = body_json.get("url") or body_json.get("target", "")
+        res = extract_website_metadata(target_url)
+        status_code = 200 if res.get("status") == "ok" else 400
+        body = json.dumps(res, indent=2).encode("utf-8")
+        self.send_response(status_code)
+        self.end_headers_with_cors("application/json; charset=utf-8")
+        self.wfile.write(body)
+
+    def _post_launch(self, body_json, parsed):
+        target = body_json.get("url") or body_json.get("app") or body_json.get("target", "")
+        resolved = APP_SHORTCUTS.get(target.lower(), target)
+
+        if not kiosk_supervisor.is_running:
+            kiosk_supervisor.start(initial_url=resolved)
+            park_cursor()
+            res = {"status": "ok", "target": resolved, "method": "kiosk_launch"}
+            body = json.dumps(res, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.end_headers_with_cors("application/json; charset=utf-8")
+            self.wfile.write(body)
+            return
+
+        loop = _get_main_loop()
+        success = False
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), loop)
+            try:
+                success = future.result(timeout=6.0)
+            except Exception:
+                success = False
+
+        if not success:
+            launch_target(resolved)
+        park_cursor()
+
+        res = {"status": "ok", "target": resolved, "method": "cdp" if success else "fallback"}
+        body = json.dumps(res, indent=2).encode("utf-8")
+        self.send_response(200)
+        self.end_headers_with_cors("application/json; charset=utf-8")
+        self.wfile.write(body)
+
+    def _post_kiosk_close(self, body_json, parsed):
+        print("💻 [HTTP API] Exit to Windows requested. Stopping Brave Kiosk...")
+        kiosk_supervisor.stop()
+        try:
+            user32.SetCursorPos(500, 500)
+        except Exception:
+            pass
+        payload = {
+            "status": "ok",
+            "cmd": "kiosk_close",
+            "message": "Brave Kiosk closed, returned to Windows desktop",
+        }
+        body = json.dumps(payload, indent=2).encode("utf-8")
+        self.send_response(200)
+        self.end_headers_with_cors("application/json; charset=utf-8")
+        self.wfile.write(body)
+
+    def _post_search(self, body_json, parsed):
+        q_params = urllib.parse.parse_qs(parsed.query)
+        query = body_json.get("query") or body_json.get("q") or q_params.get("q", [""])[0] or q_params.get("query", [""])[0]
+        destination = (body_json.get("destination") or q_params.get("destination", ["youtube"])[0] or "youtube").lower()
+        encoded = urllib.parse.quote_plus(str(query).strip())
+
+        if destination in ("hotstar", "disney"):
+            target_url = f"https://www.hotstar.com/in/explore?search_query={encoded}"
+        elif destination in ("web", "google"):
+            target_url = f"https://www.google.com/search?q={encoded}"
+        else:
+            target_url = f"https://www.youtube.com/results?search_query={encoded}"
+
+        if query:
+            loop = _get_main_loop()
+            if kiosk_supervisor.is_running and loop and loop.is_running():
+                try:
+                    asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(target_url), loop)
+                except Exception:
+                    launch_target(target_url)
+            else:
+                launch_target(target_url)
+            park_cursor()
+
+        payload = {
+            "status": "ok",
+            "cmd": "search",
+            "query": query,
+            "destination": destination,
+            "target": target_url,
+        }
+        body = json.dumps(payload, indent=2).encode("utf-8")
+        self.send_response(200)
+        self.end_headers_with_cors("application/json; charset=utf-8")
+        self.wfile.write(body)
+
 
     def do_DELETE(self):
         try:
@@ -413,6 +424,13 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         if not path:
             path = "/"
+            
+        if path == "/api/health":
+            body = json.dumps({"status": "ok", "uptime": time.time() - START_TIME}).encode("utf-8")
+            self.send_response(200)
+            self.end_headers_with_cors("application/json; charset=utf-8")
+            self.wfile.write(body)
+            return
 
         # Block GET requests on state-changing endpoints (Fix for Bug 3 drive-by attacks)
         if path in ("/api/kiosk/close", "/api/kiosk_close", "/api/exit", "/api/search", "/api/launch", "/api/open"):

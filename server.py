@@ -44,15 +44,8 @@ if __name__ == "__main__":
         print(f"[-] Error: Could not find app.py at {APP_PATH}")
         sys.exit(1)
 
-    # Import and run app.py main()
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("app", APP_PATH)
-    app_module = importlib.util.module_from_spec(spec)
-    sys.modules["app"] = app_module
-    spec.loader.exec_module(app_module)
-
-    import asyncio
+    import subprocess
     try:
-        asyncio.run(app_module.main())
+        subprocess.run([sys.executable, "app.py"], cwd=BASE_DIR)
     except KeyboardInterrupt:
         print("\n🛑 MOM TV Server stopped by user.")

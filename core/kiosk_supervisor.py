@@ -10,14 +10,23 @@ import threading
 import shutil
 import winreg
 import atexit
+from collections import deque
 from core.config import CDP_PORT, HTTP_PORT, BRAVE_PROFILE_DIR, BASE_DIR, SMART_TV_UA, TV_URL
 from core.win32_input import park_cursor
+
+try:
+    from core.config import BROWSER_CANDIDATES
+except ImportError:
+    BROWSER_CANDIDATES = None
 
 __all__ = [
     "BraveKioskSupervisor",
     "kiosk_supervisor",
 ]
 
+
+import logging
+logger = logging.getLogger(__name__)
 
 class BraveKioskSupervisor:
     """
@@ -38,9 +47,18 @@ class BraveKioskSupervisor:
         self._should_run = False
         self._watchdog_thread = None
         self._lock = threading.Lock()
+        self._crash_times = deque(maxlen=5)
+        self._consecutive_crashes = 0
 
     def _detect_brave(self) -> tuple[str, str | None]:
         """Detect Brave browser executable path with fallback to registry and standard locations."""
+        if BROWSER_CANDIDATES:
+            for name, path_tpl in BROWSER_CANDIDATES:
+                p = os.path.expandvars(path_tpl)
+                if os.path.isfile(p):
+                    return name, p
+
+        # TODO: Move these completely to core/config.py if not already present
         # 1. Primary path
         primary = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
         if os.path.isfile(primary):
@@ -88,6 +106,10 @@ class BraveKioskSupervisor:
 
     @property
     def is_running(self) -> bool:
+        """
+        Check if the kiosk process is currently running.
+        Note: The brief staleness window between process death and poll() update is an accepted tradeoff.
+        """
         return self.process is not None and self.process.poll() is None
 
     def start(self, initial_url: str | None = None):
@@ -100,7 +122,7 @@ class BraveKioskSupervisor:
             self._watchdog_thread = threading.Thread(target=self._watchdog_loop, name="BraveWatchdog", daemon=True)
             self._watchdog_thread.start()
 
-    def _launch_process(self, initial_url: str | None = None):
+    def _launch_process(self, initial_url: str | None = None, disable_gpu: bool = False):
         if not self.browser_path or not os.path.isfile(self.browser_path):
             print(f"[-] [Kiosk Supervisor] Browser binary not found at: {self.browser_path}")
             return
@@ -125,6 +147,8 @@ class BraveKioskSupervisor:
             "--window-position=0,0",
             "--start-maximized",
         ]
+        if disable_gpu:
+            args.append("--disable-gpu")
 
         extension_dir = os.path.join(BASE_DIR, "mom-tv-extension")
         if os.path.isdir(extension_dir):
@@ -152,9 +176,20 @@ class BraveKioskSupervisor:
                 break
             with self._lock:
                 if self.process is None or self.process.poll() is not None:
+                    now = time.time()
+                    self._crash_times.append(now)
+                    self._consecutive_crashes += 1
+
+                    if len(self._crash_times) == 5 and (now - self._crash_times[0]) <= 60:
+                        print("[-] [Kiosk Supervisor] FATAL: 5 crashes in 60s. Stopping auto-restart.")
+                        self._should_run = False
+                        break
+
                     exit_code = self.process.poll() if self.process else "None"
                     print(f"⚠️  [Kiosk Supervisor] Brave process ended (Exit code: {exit_code}). Auto-restarting...")
-                    self._launch_process()
+                    self._launch_process(disable_gpu=(self._consecutive_crashes >= 3))
+                else:
+                    self._consecutive_crashes = 0
 
     def stop(self):
         """Gracefully terminate the Brave Kiosk process."""
@@ -164,7 +199,7 @@ class BraveKioskSupervisor:
                 pid = self.process.pid
                 print(f"🛑 [Kiosk Supervisor] Terminating {self.browser_name} Kiosk (PID: {pid})...")
                 try:
-                    subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True)
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
                 except Exception:
                     try:
                         self.process.terminate()

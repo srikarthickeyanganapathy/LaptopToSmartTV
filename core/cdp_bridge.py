@@ -8,10 +8,9 @@ import json
 import urllib.request
 import asyncio
 import websockets
-from core.config import CDP_PORT, HTTP_PORT, BASE_DIR, CDP_KEY_MAP, SMART_TV_UA, TV_URL
+from core.config import CDP_PORT, HTTP_PORT, BASE_DIR, CDP_KEY_MAP, SMART_TV_UA, TV_URL, DESKTOP_UA
 
-DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
+# CDP-specific extensions of the base UA strings
 SMART_TV_UA_METADATA = {
     "brands": [{"brand": "SamsungBrowser", "version": "4.0"}],
     "platform": "Tizen",
@@ -108,10 +107,19 @@ class CDPControllerBridge:
 
         return pages[0]
 
+    def _pick_ua_for_url(self, url: str) -> tuple[str, str, dict]:
+        """Return the appropriate UA string, platform, and metadata based on URL pattern."""
+        url_lower = (url or "").lower()
+        if "youtube.com/tv" in url_lower or f":{self.http_port}/tv" in url_lower:
+            return SMART_TV_UA, "Tizen", SMART_TV_UA_METADATA
+        return DESKTOP_UA, "Win32", DESKTOP_UA_METADATA
+
     async def run(self):
         """Maintain persistent CDP connection to Brave with automatic reconnection."""
         self._running = True
         print(f"🔄 [CDP Bridge] Worker started. Monitoring port {self.cdp_port}...")
+        
+        attempt = 0
 
         while self._running:
             try:
@@ -131,11 +139,12 @@ class CDPControllerBridge:
                 async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
                     self.ws = ws
                     self._connected.set()
+                    attempt = 0  # reset on successful connection
                     print("⚡ [CDP Bridge] Connected to Brave Chrome DevTools Protocol!")
 
                     # Enable core domains
-                    await self._send_internal("Page.enable")
-                    await self._send_internal("Runtime.enable")
+                    await self.send("Page.enable", wait_response=True)
+                    await self.send("Runtime.enable", wait_response=True)
 
                     # Automatically inject tv-engine.js
                     await self._inject_tv_engine()
@@ -163,11 +172,10 @@ class CDPControllerBridge:
                             elif method == "Page.frameNavigated":
                                 frame = msg.get("params", {}).get("frame", {})
                                 if not frame.get("parentId"):
-                                    f_url = (frame.get("url") or "").lower()
-                                    if "youtube.com/tv" in f_url or f":{self.http_port}/tv" in f_url:
-                                        asyncio.create_task(self.send("Emulation.setUserAgentOverride", {"userAgent": SMART_TV_UA, "platform": "Tizen", "userAgentMetadata": SMART_TV_UA_METADATA}))
-                                    elif f_url and not f_url.startswith("about:"):
-                                        asyncio.create_task(self.send("Emulation.setUserAgentOverride", {"userAgent": DESKTOP_UA, "platform": "Win32", "userAgentMetadata": DESKTOP_UA_METADATA}))
+                                    f_url = frame.get("url")
+                                    if f_url and not f_url.startswith("about:"):
+                                        ua, plat, meta = self._pick_ua_for_url(f_url)
+                                        asyncio.create_task(self.send("Emulation.setUserAgentOverride", {"userAgent": ua, "platform": plat, "userAgentMetadata": meta}))
 
             except (websockets.exceptions.ConnectionClosed, ConnectionRefusedError, OSError):
                 pass
@@ -178,7 +186,9 @@ class CDPControllerBridge:
             finally:
                 self._cleanup_connection()
                 if self._running:
-                    await asyncio.sleep(1.5)
+                    backoff = min(30.0, 1.5 * (1.5 ** attempt))
+                    attempt += 1
+                    await asyncio.sleep(backoff)
 
     def _cleanup_connection(self):
         """Clean up state on disconnect."""
@@ -189,29 +199,6 @@ class CDPControllerBridge:
             if not fut.done():
                 fut.cancel()
         self._pending_futures.clear()
-
-    async def _send_internal(self, method: str, params: dict = None) -> dict | None:
-        """Internal helper to dispatch RPC command over CDP."""
-        if not self.ws:
-            return None
-        async with self._lock:
-            self._msg_id += 1
-            msg_id = self._msg_id
-
-        req = {"id": msg_id, "method": method}
-        if params:
-            req["params"] = params
-
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._pending_futures[msg_id] = fut
-
-        try:
-            await self.ws.send(json.dumps(req))
-            return await asyncio.wait_for(fut, timeout=4.0)
-        except Exception:
-            self._pending_futures.pop(msg_id, None)
-            return None
 
     async def send(self, method: str, params: dict = None, wait_response: bool = True, timeout: float = 3.5) -> dict | None:
         """Send a CDP command with optional response waiting."""
@@ -273,7 +260,7 @@ class CDPControllerBridge:
         await self.send("Runtime.evaluate", {"expression": script_source, "returnByValue": True})
         print("⚡ [CDP Bridge] Evaluated tv-engine.js on current active page")
 
-    def close_secondary_tabs(self, preserve_target_id: str = None) -> int:
+    def _close_secondary_tabs(self, preserve_target_id: str = None) -> int:
         """Strict Single-Tab Kiosk Enforcement: Close all background tabs while preserving the active foreground tab."""
         targets = self._fetch_targets()
         pages = [t for t in targets if t.get("type") == "page"]
@@ -333,6 +320,10 @@ class CDPControllerBridge:
             print(f"🧹 [CDP Bridge] Closed {closed} secondary tab(s). Kept active tab: {primary.get('title', 'Primary')}")
         return closed
 
+    # Deprecated alias
+    def close_secondary_tabs(self, preserve_target_id: str = None) -> int:
+        return self._close_secondary_tabs(preserve_target_id)
+
     # --------------------------------------------------------------------------
     # HIGH-LEVEL SINGLE-WINDOW NAVIGATION & CONTROL API
     # --------------------------------------------------------------------------
@@ -341,18 +332,19 @@ class CDPControllerBridge:
         if not self.is_connected:
             await self.wait_connected(timeout=4.0)
         print(f"🧭 [CDP Bridge] Navigating in-place to: {url}")
-        target_lower = (url or "").lower()
-        if "youtube.com/tv" in target_lower or f":{self.http_port}/tv" in target_lower:
-            await self.send("Emulation.setUserAgentOverride", {"userAgent": SMART_TV_UA, "platform": "Tizen", "userAgentMetadata": SMART_TV_UA_METADATA})
+        
+        ua, plat, meta = self._pick_ua_for_url(url)
+        await self.send("Emulation.setUserAgentOverride", {"userAgent": ua, "platform": plat, "userAgentMetadata": meta})
+        if ua == SMART_TV_UA:
             print(f"📺 [CDP Bridge] Applied Smart TV User-Agent override for YouTube TV")
         else:
-            await self.send("Emulation.setUserAgentOverride", {"userAgent": DESKTOP_UA, "platform": "Win32", "userAgentMetadata": DESKTOP_UA_METADATA})
             print(f"💻 [CDP Bridge] Applied Desktop User-Agent for custom web application")
+            
         await self.send("Page.bringToFront")
         res = await self.send("Page.navigate", {"url": url})
         target_id = self._active_target.get("id") if self._active_target else None
         # Clean up any secondary tabs that may have opened while preserving this target
-        await asyncio.to_thread(self.close_secondary_tabs, target_id)
+        await asyncio.to_thread(self._close_secondary_tabs, target_id)
         return bool(res and "result" in res)
 
     async def home(self) -> bool:

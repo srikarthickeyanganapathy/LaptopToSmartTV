@@ -12,6 +12,7 @@ __all__ = [
     "LOCAL_IP",
     "QR_SVG_CACHE",
     "get_qr_svg_data",
+    "refresh_ip",
 ]
 
 
@@ -24,11 +25,22 @@ def get_local_ip() -> str:
         s.close()
         return ip
     except Exception:
+        print("[-] Warning: Network unreachable. Using loopback (127.0.0.1)")
         return "127.0.0.1"
 
 
 LOCAL_IP = get_local_ip()
 QR_SVG_CACHE = None
+
+
+def refresh_ip() -> str:
+    """Update LOCAL_IP module-level var and invalidate QR cache if IP changed."""
+    global LOCAL_IP, QR_SVG_CACHE
+    new_ip = get_local_ip()
+    if new_ip != LOCAL_IP:
+        LOCAL_IP = new_ip
+        QR_SVG_CACHE = None
+    return LOCAL_IP
 
 
 def get_qr_svg_data() -> bytes:
@@ -47,4 +59,4 @@ def get_qr_svg_data() -> bytes:
         QR_SVG_CACHE = buf.getvalue()
         return QR_SVG_CACHE
     except Exception as e:
-        return str(e).encode("utf-8")
+        return b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><text x="10" y="100" fill="red">QR Unavailable</text></svg>'

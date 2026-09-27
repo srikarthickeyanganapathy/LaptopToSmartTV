@@ -6,23 +6,63 @@ Responsibilities: Coordinates CDP in-place navigation, supervised kiosk launchin
 import os
 import sys
 import asyncio
+import logging
 from core.apps_manager import APP_SHORTCUTS
 from core.kiosk_supervisor import kiosk_supervisor
 from core.cdp_bridge import cdp_bridge
 from core.win32_input import park_cursor
+from core.loop_registry import get_loop
 
 __all__ = ["launch_target"]
 
+logger = logging.getLogger(__name__)
 
-def _get_main_loop() -> asyncio.AbstractEventLoop | None:
-    """Safely obtain the active main asyncio event loop."""
-    app_mod = sys.modules.get("app")
-    if app_mod and getattr(app_mod, "MAIN_LOOP", None):
-        return app_mod.MAIN_LOOP
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
+# Targets to ignore silently (e.g. internal frontend modals that don't need backend routing)
+IGNORED_TARGETS = {'photos://modal'}
+
+def _strategy_ignored(resolved: str) -> bool:
+    if resolved in IGNORED_TARGETS:
+        return True
+    return False
+
+def _strategy_start_kiosk(resolved: str) -> bool:
+    if not kiosk_supervisor.is_running:
+        logger.info("🛡️ [Launcher] Starting Brave Kiosk Supervisor...")
+        kiosk_supervisor.start()
+        park_cursor()
+        return True
+    return False
+
+def _strategy_cdp_navigate(resolved: str) -> bool:
+    loop = get_loop()
+    if kiosk_supervisor.is_running and cdp_bridge.is_connected and loop and not loop.is_closed():
+        asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), loop)
+        park_cursor()
+        return True
+    return False
+
+def _strategy_local_file(resolved: str) -> bool:
+    if not (resolved.startswith("http://") or resolved.startswith("https://")):
+        if resolved.startswith("file:///") or os.path.exists(resolved):
+            logger.info(f"📂 Opening local target: {resolved}")
+            os.startfile(resolved)
+            park_cursor()
+            return True
+    return False
+
+def _strategy_fallback(resolved: str) -> bool:
+    if not kiosk_supervisor.is_running:
+        kiosk_supervisor.start()
+    park_cursor()
+    return True
+
+_LAUNCH_STRATEGIES = [
+    _strategy_ignored,
+    _strategy_start_kiosk,
+    _strategy_cdp_navigate,
+    _strategy_local_file,
+    _strategy_fallback
+]
 
 
 def launch_target(target: str, is_home: bool = False):
@@ -31,33 +71,7 @@ def launch_target(target: str, is_home: bool = False):
         return
 
     resolved = APP_SHORTCUTS.get(target.lower(), target)
-    if resolved == "photos://modal":
-        return
-
-    # If Brave Kiosk supervisor is not running, start it cleanly in supervised mode!
-    if not kiosk_supervisor.is_running:
-        print("🛡️ [Launcher] Starting Brave Kiosk Supervisor...")
-        kiosk_supervisor.start()
-        park_cursor()
-        return
-
-    # If Brave Kiosk is active and CDP connected, navigate in-place!
-    loop = _get_main_loop()
-    if kiosk_supervisor.is_running and cdp_bridge.is_connected and loop and not loop.is_closed():
-        asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), loop)
-        park_cursor()
-        return
-
-    # Local file / directory fallback ONLY if not a web URL
-    if not (resolved.startswith("http://") or resolved.startswith("https://")):
-        if resolved.startswith("file:///") or os.path.exists(resolved):
-            print(f"📂 Opening local target: {resolved}")
-            os.startfile(resolved)
-            park_cursor()
-            return
-
-    # Last resort fallback: restart supervised kiosk
-    if not kiosk_supervisor.is_running:
-        kiosk_supervisor.start()
-
-    park_cursor()
+    
+    for strategy in _LAUNCH_STRATEGIES:
+        if strategy(resolved):
+            break
