@@ -1,17 +1,20 @@
 {
   "manifest_version": 3,
   "name": "MOM TV Leanback Companion",
-  "version": "2.0.0",
-  "description": "Transforms web streaming services into a 10-foot TV experience with snap-to-card navigation, TV exit dialogs, and video remote controls.",
+  "version": "3.1.0",
+  "minimum_chrome_version": "111",
+  "description": "Turns any website into a 10-foot TV app: spatial D-pad navigation, video remote controls, on-screen text entry, exit dialog and per-site TV zoom.",
   "permissions": [
-    "activeTab",
-    "scripting",
     "storage",
+    "webNavigation",
     "declarativeNetRequest"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "declarative_net_request": {
     "rule_resources": [
       {
@@ -22,7 +25,11 @@
     ]
   },
   "action": {
-    "default_title": "MOM TV Leanback Companion"
+    "default_title": "MOM TV Leanback Companion",
+    "default_icon": {
+      "192": "icon-192.png",
+      "512": "icon-512.png"
+    }
   },
   "icons": {
     "192": "icon-192.png",
@@ -30,17 +37,16 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "css": [
-        "styles.css"
-      ],
-      "js": [
-        "content.js"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
       "run_at": "document_start",
       "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
       "all_frames": false
     }
   ]

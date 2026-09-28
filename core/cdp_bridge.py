@@ -390,7 +390,7 @@ class CDPControllerBridge:
         """
         Direct Key Injection:
         1. Calls window.MomTV?.handleKey(keyName) for spatial navigation & player takeover.
-        2. Dispatches Input.dispatchKeyEvent (rawKeyDown + keyUp) directly into the page DOM.
+        2. ONLY if unhandled, dispatches Input.dispatchKeyEvent as a DOM fallback.
         """
         k = (key_name or "").lower()
 
@@ -401,15 +401,18 @@ class CDPControllerBridge:
         js_call = f"window.MomTV?.handleKey?.({json.dumps(k)})"
         handled = await self.evaluate(js_call)
 
-        # Step 2: Synthesize CDP Input DOM Key Events if not handled by MomTV engine
-        dispatched_cdp = False
-        if not handled and k in CDP_KEY_MAP:
+        # Step 2: ONLY if the MomTV engine did NOT handle it, synthesize DOM key events.
+        # If the engine handled it, dispatching CDP key events would cause double-processing
+        # because the extension's keydown listener would also see them.
+        if handled:
+            return True
+
+        if k in CDP_KEY_MAP:
             info = CDP_KEY_MAP[k]
             vk = info["windowsVirtualKeyCode"]
             key_val = info["key"]
             code_val = info["code"]
 
-            # Dispatch rawKeyDown
             await self.send("Input.dispatchKeyEvent", {
                 "type": "rawKeyDown",
                 "key": key_val,
@@ -418,7 +421,6 @@ class CDPControllerBridge:
                 "nativeVirtualKeyCode": vk,
             }, wait_response=False)
 
-            # Dispatch keyUp
             await self.send("Input.dispatchKeyEvent", {
                 "type": "keyUp",
                 "key": key_val,
@@ -426,9 +428,9 @@ class CDPControllerBridge:
                 "windowsVirtualKeyCode": vk,
                 "nativeVirtualKeyCode": vk,
             }, wait_response=False)
-            dispatched_cdp = True
+            return True
 
-        return bool(handled or dispatched_cdp)
+        return False
 
     async def stop(self):
         """Stop worker and close connection."""

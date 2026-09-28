@@ -1,5 +1,5 @@
 /**
- * MOM TV LEANBACK COMPANION — CONTENT ENGINE
+ * MOM TV LEANBACK COMPANION — CONTENT ENGINE (CDP FALLBACK)
  * Injected into every page loaded inside the MOM TV kiosk browser to provide a
  * 10-foot "leanback" experience: spatial D-pad navigation over ordinary web
  * pages, a video remote (rewind/forward/play/pause), a virtual mouse cursor
@@ -7,22 +7,49 @@
  *
  * Public surface: window.MomTV.handleKey(name) — called by the native host
  * (or the phone remote via WebSocket) for every remote button press.
+ *
+ * v2.1:
+ *  - Detects the extension's engine AT ANY TIME (not just at injection) and
+ *    tears itself down completely: UI nodes, style tag, listeners, observer,
+ *    tabindex/data-tv-card markers and hover state are all removed.
+ *  - Single-click activation (was 2-4 clicks), no SPA-breaking forced navigation.
+ *  - Text entry mode (physical keyboard + phone remote typeText/backspace/submit).
+ *  - Real-player gating so hero autoplay trailers no longer hijack the D-pad.
+ *  - Fresh geometry every scan (the old _momTvRect cache went stale after scroll).
+ *  - Rest-delayed hover, stale-retry guards, modal/cookie close on Back.
  */
 (function () {
   'use strict';
 
   if (typeof window !== 'undefined') {
+    // If the extension's content.js already loaded, it has the superior engine with
+    // Shadow DOM overlay, counter-scaling, trail memory nav, modal trapping, etc.
+    // Its MomTV API is defined as non-configurable + frozen — that's our detection signal.
+    const desc = Object.getOwnPropertyDescriptor(window, 'MomTV');
+    if (desc && !desc.configurable && desc.value && Object.isFrozen(desc.value)) {
+      console.log('[MOM TV Engine] Extension content.js already active — yielding.');
+      return;
+    }
     if (window.__MOM_TV_ENGINE_LOADED__) return;
     window.__MOM_TV_ENGINE_LOADED__ = true;
     window.__MomTVLoaded = true; // kept for older host builds that check this flag
   }
 
-  console.log('🚀 [MOM TV Companion 2.0] Initializing TV engine...');
+  const HOME_URL = 'http://localhost:8765/tv';
+  const ERUDA_HOME_URL = 'http://localhost:8765/static/eruda.min.js'; // FIX: absolute — the relative '/static/...' hit the current site's server (404 everywhere except localhost)
+  const ENGINE_DEBOUNCE_MS = 70;
+
+  // FIX: set when the extension's engine takes over (or we crash out) — every module
+  // checks this before touching the page, and deactivateEngine() uses it to tear down.
+  let engineDeactivated = false;
+
+  console.log('🚀 [MOM TV Companion 2.1] Initializing TV engine (CDP fallback)...');
 
   /* ==========================================================================
      0. SINGLE-WINDOW KIOSK ENFORCEMENT
      A kiosk has exactly one window. Anything that would open a new tab/window
      (window.open, target="_blank" links or forms) is redirected in-place.
+     Idempotent — safe to run alongside the extension's identical patch.
      ========================================================================== */
   (function enforceSingleWindow() {
     try {
@@ -75,10 +102,13 @@
      2. INJECT LEANBACK STYLES
      Safely handles execution at document_start where document.head and
      document.documentElement may be null. Defers until DOM is available.
+     NOTE: injection is deferred to engage() so that when the extension is
+     present, this engine never leaves a style tag in the page at all.
      ========================================================================== */
   const STYLE_ID = 'momtv-companion-styles';
   const LEANBACK_CSS = `
-html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
+/* CSS zoom removed — the extension handles 10-foot scaling via chrome.tabs.setZoom.
+   Applying CSS zoom here would compound with the browser-level zoom, causing double-zoom. */
 
 .momtv-icon { display: inline-flex; width: 1em; height: 1em; vertical-align: -0.14em; }
 .momtv-icon svg { width: 100%; height: 100%; }
@@ -87,10 +117,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   outline: 4px solid #00f0ff !important;
   outline-offset: 4px !important;
   box-shadow: 0 0 25px rgba(0, 240, 255, 0.9) !important;
-  transform: scale(1.05) !important;
-  transition: transform 0.16s cubic-bezier(0.2, 0.9, 0.3, 1), outline 0.15s ease, box-shadow 0.16s ease !important;
+  transition: outline 0.15s ease, box-shadow 0.16s ease !important;
   z-index: 999999 !important;
-  position: relative !important;
 }
 
 .momtv-focused-input {
@@ -194,16 +222,18 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   position: fixed; top: 0; left: 0; width: 28px; height: 28px;
   pointer-events: none !important; z-index: 2147483647; opacity: 0;
   transform: translate(-100px, -100px);
-  transition: opacity 0.22s cubic-bezier(0.2, 0.9, 0.3, 1), transform 0.04s linear;
+  transition: opacity 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
   filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.95)) drop-shadow(0 0 18px rgba(0, 240, 255, 0.65));
   will-change: transform, opacity;
 }
 #momtv-virtual-cursor.visible { opacity: 1; }
-#momtv-virtual-cursor.clicking { filter: drop-shadow(0 0 14px rgba(255, 255, 255, 1)) drop-shadow(0 0 28px rgba(0, 240, 255, 1)); transform: scale(0.85) !important; }
+#momtv-virtual-cursor.clicking { filter: drop-shadow(0 0 14px rgba(255, 255, 255, 1)) drop-shadow(0 0 28px rgba(0, 240, 255, 1)); }
+#momtv-virtual-cursor.clicking svg { transform: scale(0.85); transform-origin: 4px 3px; }
 `;
 
   function injectLeanbackStyles() {
     try {
+      if (engineDeactivated) return; // FIX: never (re)inject after teardown
       if (typeof document === 'undefined' || !document) return;
       if (document.getElementById(STYLE_ID)) return;
 
@@ -217,15 +247,14 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
 
       // If run at document_start before <html> or <head> exists
-      const onReady = () => injectLeanbackStyles();
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', onReady, { once: true });
+        document.addEventListener('DOMContentLoaded', () => injectLeanbackStyles(), { once: true });
       }
       if (typeof MutationObserver !== 'undefined') {
         const obs = new MutationObserver(() => {
           const t = document.head || document.documentElement;
           if (t && t.appendChild) {
-            obs.disconnect();
+            obs.disconnect(); // FIX: the old fallback observer never disconnected
             injectLeanbackStyles();
           }
         });
@@ -235,7 +264,6 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
     } catch (_) {}
   }
-  injectLeanbackStyles();
 
   /* ==========================================================================
      3. SHARED UTILITIES
@@ -261,13 +289,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   }
 
   function apply10FootScaling() {
-    try {
-      if (isInternalMomTVPage() || isYouTubeTVPage()) return;
-      if (document.documentElement) {
-        document.documentElement.classList.add('momtv-10ft-scaled');
-        document.documentElement.setAttribute('data-momtv-zoom', '135');
-      }
-    } catch (_) {}
+    // No-op: 10-foot scaling is handled by the extension's background.js via
+    // chrome.tabs.setZoom(). Applying CSS zoom here would compound with it.
   }
   apply10FootScaling();
   if (typeof document !== 'undefined' && document.readyState === 'loading') {
@@ -281,6 +304,36 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     const h = Math.floor(seconds / 3600);
     const pad = (n) => (n < 10 ? '0' + n : '' + n);
     return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+
+  /**
+   * FIX: Chrome's KeyboardEvent constructor silently IGNORES keyCode/which in the
+   * init dict, yet many player UIs still branch on e.which/e.keyCode. Shadow the
+   * prototype getters with the intended values so legacy handlers respond.
+   */
+  function keyEvent(type, opts) {
+    let ev;
+    try { ev = new KeyboardEvent(type, opts); }
+    catch (_) { return new Event(type, { bubbles: true, cancelable: true }); }
+    try {
+      const code = opts.keyCode || 0;
+      Object.defineProperty(ev, 'keyCode', { get: () => code });
+      Object.defineProperty(ev, 'which', { get: () => code });
+    } catch (_) { /* best effort */ }
+    return ev;
+  }
+
+  /** FIX: hoisted so both SpatialNav and VirtualCursor can use it. */
+  function findScrollContainer(el) {
+    let node = el ? el.parentElement : null;
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (node.scrollHeight > node.clientHeight + 40) {
+        const oy = window.getComputedStyle(node).overflowY;
+        if (oy === 'auto' || oy === 'scroll') return node;
+      }
+      node = node.parentElement;
+    }
+    return window;
   }
 
   /* ==========================================================================
@@ -309,7 +362,6 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
     }
 
-    // Each tone is (waveform, [startFreq, endFreq], durationSeconds, gain).
     const TONES = {
       focus:  { type: 'sine',     from: 540, to: 420, dur: 0.035, gain: 0.12 },
       select: { type: 'triangle', from: 640, to: 880, dur: 0.08,  gain: 0.15 },
@@ -361,6 +413,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     let lastFocusedBeforeOpen = null;
 
     function ensureExitDialogElements() {
+      if (engineDeactivated) return null; // FIX
+      injectLeanbackStyles(); // FIX: styles exist whenever our UI does
       let backdrop = document.getElementById('momtv-exit-backdrop');
       if (backdrop) return backdrop;
 
@@ -392,7 +446,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       if (exitBtn) {
         exitBtn.addEventListener('click', () => {
           playSound('select');
-          window.location.href = 'http://localhost:8765/tv';
+          window.location.href = HOME_URL;
         });
       }
 
@@ -429,7 +483,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       if (backdrop) backdrop.classList.remove('visible');
       isOpen = false;
       playSound('back');
-      if (lastFocusedBeforeOpen && isElementInDoc(lastFocusedBeforeOpen)) {
+      if (lastFocusedBeforeOpen && isElementInDoc(lastFocusedBeforeOpen) && !engineDeactivated) {
         SpatialNav.setFocus(lastFocusedBeforeOpen);
       }
     }
@@ -443,7 +497,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       if (['enter', 'ok', 'select', 'space'].includes(k)) {
         if (activeBtnIndex === 1) {
           playSound('select');
-          window.location.href = 'http://localhost:8765/tv';
+          window.location.href = HOME_URL;
         } else {
           hideExitDialog();
         }
@@ -465,12 +519,14 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   })();
 
   /* ==========================================================================
-     6. HUD (ON-SCREEN DISPLAY) & FLOATING PLAYER ACTION BAR
+     6. HUD (ON-SCREEN DISPLAY), NOW-PLAYING & FLOATING PLAYER ACTION BAR
      ========================================================================== */
   const HUD = (() => {
     let hideTimer = null;
 
     function ensureElements() {
+      if (engineDeactivated) return null; // FIX
+      injectLeanbackStyles(); // FIX
       let pill = document.getElementById('momtv-hud-pill');
       if (pill) return pill;
       const target = document.body || document.documentElement;
@@ -530,12 +586,14 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     _timer: null,
     show(text) {
       try {
+        if (engineDeactivated) return; // FIX: no stray pill once the extension owns the page
         let el = document.getElementById('momtv-now-playing');
         if (!el) {
           const target = document.body || document.documentElement;
           if (!target) return;
           el = document.createElement('div');
           el.id = 'momtv-now-playing';
+          el.className = 'momtv-internal';
           el.style.cssText = 'position:fixed;top:16px;right:16px;padding:8px 16px;background:rgba(0,0,0,0.75);color:#fff;border-radius:8px;font:14px/1.4 system-ui;z-index:999999;transition:opacity 0.5s;pointer-events:none;';
           target.appendChild(el);
         }
@@ -546,12 +604,6 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       } catch (_) {}
     }
   };
-
-  if (typeof document !== 'undefined' && document.readyState === 'complete') {
-    setTimeout(() => NowPlaying.show('MOM TV Loading...'), 500);
-  } else if (typeof window !== 'undefined') {
-    window.addEventListener('load', () => setTimeout(() => NowPlaying.show('MOM TV Started'), 500), { once: true });
-  }
 
   const PlayerActionBar = (() => {
     let isVisible = false;
@@ -568,6 +620,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     ];
 
     function ensureElements() {
+      if (engineDeactivated) return null; // FIX
+      injectLeanbackStyles(); // FIX
       let bar = document.getElementById('momtv-player-action-bar');
       if (bar) return bar;
 
@@ -700,6 +754,85 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   })();
 
   /* ==========================================================================
+     6b. TEXT ENTRY (NEW — parity with the extension engine)
+     Physical keyboard typing plus phone-remote typeText/backspace/submitText.
+     Before this existed, Backspace in a search field triggered history.back()
+     and the remote's typing API was missing entirely in CDP mode.
+     ========================================================================== */
+  const TextEntry = (() => {
+    let editing = false;
+
+    function isField(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el.isContentEditable || el.tagName === 'TEXTAREA' || el.getAttribute('role') === 'searchbox') return true;
+      if (el.tagName !== 'INPUT') return false;
+      return ['text', 'search', 'email', 'url', 'tel', 'password', 'number'].includes((el.getAttribute('type') || 'text').toLowerCase());
+    }
+    function field() {
+      const a = document.activeElement;
+      if (isField(a)) return a;
+      const f = SpatialNav.getFocused();
+      return isField(f) ? f : null;
+    }
+    function setValue(el, v) {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
+      if (setter && setter.set) setter.set.call(el, v); else el.value = v; // native setter keeps React/Vue in sync
+    }
+    function start(el, quiet) {
+      editing = true;
+      try { el.focus(); } catch (_) {}
+      if (!quiet) HUD.show('Type on keyboard or phone', 'tv');
+    }
+    function stop() { editing = false; }
+
+    function insert(str) {
+      const el = field();
+      if (!el) return false;
+      start(el, true);
+      if (el.isContentEditable) { try { document.execCommand('insertText', false, str); } catch (_) {} return true; }
+      let s = el.value.length, e = s;
+      try { if (el.selectionStart != null) { s = el.selectionStart; e = el.selectionEnd; } } catch (_) {}
+      setValue(el, el.value.slice(0, s) + str + el.value.slice(e));
+      try { el.setSelectionRange(s + str.length, s + str.length); } catch (_) {}
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: str, inputType: 'insertText' }));
+      return true;
+    }
+    function backspace() {
+      const el = field();
+      if (!el) return false;
+      start(el, true);
+      if (el.isContentEditable) { try { document.execCommand('delete'); } catch (_) {} return true; }
+      let s = el.value.length, e = s;
+      try { if (el.selectionStart != null) { s = el.selectionStart; e = el.selectionEnd; } } catch (_) {}
+      if (s === e && s > 0) s -= 1;
+      setValue(el, el.value.slice(0, s) + el.value.slice(e));
+      try { el.setSelectionRange(s, s); } catch (_) {}
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+      return true;
+    }
+    function moveCaret(d) {
+      const el = field();
+      if (!el || el.isContentEditable) return;
+      try {
+        const p = Math.max(0, Math.min((el.selectionStart || 0) + d, el.value.length));
+        el.setSelectionRange(p, p);
+      } catch (_) {}
+    }
+    function submit() {
+      const el = field();
+      if (!el) return false;
+      const o = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+      const proceed = el.dispatchEvent(keyEvent('keydown', o));
+      el.dispatchEvent(keyEvent('keypress', o));
+      el.dispatchEvent(keyEvent('keyup', o));
+      // Synthetic Enter never triggers implicit form submission, so do it unless the page handled the key itself.
+      if (proceed && el.form) { try { el.form.requestSubmit(); } catch (_) { try { el.form.submit(); } catch (__) {} } }
+      return true;
+    }
+    return { get editing() { return editing; }, isField, start, stop, insert, backspace, moveCaret, submit };
+  })();
+
+  /* ==========================================================================
      7. VIDEO PLAYER DETECTION, SEEK ACCELERATION & PLATFORM ADAPTERS
      ========================================================================== */
   const VideoControl = (() => {
@@ -719,7 +852,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
     function getActiveVideo() {
       const now = Date.now();
-      if (_cachedVideo && (now - _cachedVideoTime) < 200) return _cachedVideo;
+      // FIX: also require the cached video to still be in the document — the old
+      // cache happily returned removed <video> elements for up to 200ms.
+      if (_cachedVideo && isElementInDoc(_cachedVideo) && (now - _cachedVideoTime) < 200) return _cachedVideo;
 
       function findVideo() {
         const videos = Array.from(document.querySelectorAll('video'));
@@ -750,14 +885,27 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       return _cachedVideo;
     }
 
+    /**
+     * FIX: "video mode" now means a REAL player — fullscreen, a known player route,
+     * the action bar, or a large non-looping, non-muted-autoplay video. Previously
+     * ANY playing video (muted autoplay hero trailers on browse pages) captured the
+     * D-pad: left/right seeked the trailer and OK toggled it instead of navigating.
+     */
     function isVideoModeActive() {
       const v = getActiveVideo();
       if (!v) { videoModeEngaged = false; return false; }
-      if (!v.paused || document.fullscreenElement || PlayerActionBar.isVisible) {
-        videoModeEngaged = true;
-        lastActiveVideo = v;
-        return true;
-      }
+
+      const fs = document.fullscreenElement;
+      if (fs && (fs === v || fs.contains(v))) { videoModeEngaged = true; lastActiveVideo = v; return true; }
+      if (PlayerActionBar.isVisible) { videoModeEngaged = true; lastActiveVideo = v; return true; }
+
+      const adapter = PlatformAdapters.all.find((a) => a.matchesHost() && a.isPlayerRoute());
+      if (adapter) { videoModeEngaged = true; lastActiveVideo = v; return true; }
+
+      const r = v.getBoundingClientRect();
+      if (r.width * r.height < window.innerWidth * window.innerHeight * 0.5) return videoModeEngaged && v === lastActiveVideo;
+      if (v.loop || (v.muted && v.autoplay)) return videoModeEngaged && v === lastActiveVideo;
+      if (!v.paused) { videoModeEngaged = true; lastActiveVideo = v; return true; }
       return videoModeEngaged && v === lastActiveVideo;
     }
 
@@ -767,7 +915,11 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     function handleKey(key, video) {
       const k = key.toLowerCase();
 
-      if (PlayerActionBar.isVisible) return PlayerActionBar.handleKey(k);
+      // FIX: the bar owns the NAVIGATION keys, but pure media keys (play/pause/track)
+      // still control the video while it is open — they used to be swallowed.
+      if (PlayerActionBar.isVisible && !['play', 'pause', 'playpause', 'rewind', 'forward'].includes(k)) {
+        return PlayerActionBar.handleKey(k);
+      }
 
       if (['left', 'rewind', 'arrowleft'].includes(k)) {
         const now = Date.now();
@@ -824,84 +976,103 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
     function query(sel) { return sel && typeof document !== 'undefined' && document.querySelector ? document.querySelector(sel) : null; }
 
+    /**
+     * FIX: isActive now requires a real player context (player route, or a video that
+     * passes the real-player test). Previously, on browse pages, a playing hero
+     * trailer made the adapter intercept OK/arrows and cards could not be opened.
+     */
     function isActive(video) {
       if (!matchesHost()) return false;
-      return isPlayerRoute() || Boolean(video || VideoControl.getActiveVideo()) && VideoControl.isVideoModeActive();
+      if (isPlayerRoute()) return true;
+      const v = video || VideoControl.getActiveVideo();
+      return Boolean(v) && VideoControl.isVideoModeActive();
     }
 
+    /**
+     * FIX: dispatched ONCE on the target — it bubbles to document by itself. The old
+     * code re-dispatched the same events on document afterwards, so every page
+     * handler ran twice. keyCode/which are also patched on now (the KeyboardEvent
+     * constructor silently drops them, which legacy player handlers rely on).
+     */
     function dispatchKey(keyStr, codeStr, keyCodeNum) {
-      if (dispatchStrategy === 'keyboard') {
-        const target = query(selectors.playerArea || 'video') || (typeof document !== 'undefined' && (document.body || document.documentElement)) || null;
-        const opts = { key: keyStr, code: codeStr, keyCode: keyCodeNum, which: keyCodeNum, bubbles: true, cancelable: true };
-        const down = new KeyboardEvent('keydown', opts);
-        const up = new KeyboardEvent('keyup', opts);
-
-        if (target && typeof target.dispatchEvent === 'function') {
-          target.dispatchEvent(down);
-          target.dispatchEvent(up);
-        }
-        if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
-          document.dispatchEvent(down);
-          document.dispatchEvent(up);
-        } else if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-          window.dispatchEvent(down);
-          window.dispatchEvent(up);
-        }
-      }
+      if (dispatchStrategy !== 'keyboard') return;
+      const target = query(selectors.playerArea) || (typeof document !== 'undefined' && (document.body || document.documentElement)) || null;
+      if (!target || typeof target.dispatchEvent !== 'function') return;
+      const opts = { key: keyStr, code: codeStr, keyCode: keyCodeNum, which: keyCodeNum, bubbles: true, cancelable: true };
+      target.dispatchEvent(keyEvent('keydown', opts));
+      target.dispatchEvent(keyEvent('keyup', opts));
     }
 
     function handleKey(key, video) {
       const k = key.toLowerCase();
-      const v = video || VideoControl.getActiveVideo();
+      const v = (video && video.isConnected !== false) ? video : VideoControl.getActiveVideo();
 
       if (['enter', 'ok', 'select', 'space', 'play', 'pause', 'playpause'].includes(k)) {
-        if (v) v.paused ? v.play().catch(() => {}) : v.pause();
-        if (dispatchStrategy === 'keyboard') { dispatchKey(' ', 'Space', 32); }
-        else { const btn = query(selectors.playPause); if (btn) btn.click(); }
-        if (v) HUD.showVideoProgress(v, v.paused ? 'Pause' : 'Play', v.paused ? 'pause' : 'play');
+        // FIX: exactly ONE toggle per press. The old code toggled the video element AND
+        // dispatched Space (keyboard strategy) or clicked the button (click strategy),
+        // so play/pause cancelled itself out and seeks applied twice.
+        if (v) {
+          if (v.paused) v.play().catch(() => {}); else v.pause();
+          HUD.showVideoProgress(v, v.paused ? 'Pause' : 'Play', v.paused ? 'pause' : 'play');
+        } else if (dispatchStrategy === 'keyboard') {
+          dispatchKey(' ', 'Space', 32);
+        } else {
+          const btn = query(selectors.playPause);
+          if (btn) btn.click();
+        }
         playSound('select');
         return true;
       }
 
       if (['left', 'rewind', 'arrowleft'].includes(k)) {
-        if (v) { v.currentTime = Math.max(0, v.currentTime - 10); HUD.showVideoProgress(v, '-10s', 'rewind'); }
-        if (dispatchStrategy === 'keyboard') { dispatchKey('ArrowLeft', 'ArrowLeft', 37); }
-        else { const btn = query(selectors.rewind); if (btn) btn.click(); }
+        // FIX: one seek path per strategy — keys OR button OR currentTime, never two.
+        if (dispatchStrategy === 'keyboard') {
+          dispatchKey('ArrowLeft', 'ArrowLeft', 37); // Netflix throws on direct currentTime seeks
+        } else {
+          const btn = query(selectors.rewind);
+          if (btn) btn.click();
+          else if (v) v.currentTime = Math.max(0, v.currentTime - 10);
+        }
+        if (v) HUD.showVideoProgress(v, '-10s', 'rewind');
         playSound('seek');
         return true;
       }
 
       if (['right', 'forward', 'arrowright'].includes(k)) {
-        if (v) { v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10); HUD.showVideoProgress(v, '+10s', 'forward'); }
-        if (dispatchStrategy === 'keyboard') { dispatchKey('ArrowRight', 'ArrowRight', 39); }
-        else { const btn = query(selectors.forward); if (btn) btn.click(); }
+        if (dispatchStrategy === 'keyboard') {
+          dispatchKey('ArrowRight', 'ArrowRight', 39);
+        } else {
+          const btn = query(selectors.forward);
+          if (btn) btn.click();
+          else if (v) v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10);
+        }
+        if (v) HUD.showVideoProgress(v, '+10s', 'forward');
         playSound('seek');
         return true;
       }
 
-      if (['back', 'escape'].includes(k)) {
-        const btn = query(selectors.back);
-        if (btn) { btn.click(); playSound('back'); return true; }
-        if (dispatchStrategy === 'keyboard') {
-          dispatchKey('Escape', 'Escape', 27);
-          if (path().includes('/watch') && name === 'netflix') { window.location.href = 'https://www.netflix.com/browse'; return true; }
-        }
-      }
+      if (['back', 'escape'].includes(k)) return handleBack();
 
       return false;
     }
 
+    /**
+     * FIX: the site Back button is only clicked inside a real player. Previously
+     * handleBack ran on browse pages too, so any stray aria-label="Back" element
+     * on the site got clicked when the user pressed Back.
+     */
     function handleBack() {
+      if (!isPlayerRoute() && !document.fullscreenElement) return false;
       const btn = query(selectors.back);
       if (btn) { btn.click(); return true; }
-      if (dispatchStrategy === 'keyboard' && path().includes('/watch') && name === 'netflix') {
+      if (dispatchStrategy === 'keyboard' && name === 'netflix' && path().includes('/watch')) {
         window.location.href = 'https://www.netflix.com/browse';
         return true;
       }
       return false;
     }
 
-    return { name, matchesHost, isActive, handleKey, handleBack };
+    return { name, matchesHost, isPlayerRoute, isActive, handleKey, handleBack };
   }
 
   const host = () => (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
@@ -981,10 +1152,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     },
 
     handleBack() {
+      // FIX: adapters self-guard to player contexts now — no stray Back-button clicks
+      // on browse pages.
       for (const adapter of this.all) {
-        if (adapter.matchesHost() && (adapter.handleBack ? adapter.handleBack() : adapter.isActive())) {
-          return true;
-        }
+        if (adapter.matchesHost() && adapter.handleBack()) return true;
       }
       return false;
     }
@@ -1029,21 +1200,31 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     return el;
   }
 
+  /**
+   * Sends the natural pre-click hover + press sequence. NOTE: no synthetic 'click'
+   * here — the caller fires exactly one real .click(). The old version also
+   * dispatched a synthetic click event AND clicked both the target and the card,
+   * so handlers ran 2-4 times (dropdowns opened then closed, play toggled twice).
+   */
   function dispatchPointerSequence(target, clientX, clientY) {
     const base = { bubbles: true, cancelable: true, view: window, clientX, clientY };
-    target.dispatchEvent(new PointerEvent('pointerdown', { ...base, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+    const ptr = { pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    target.dispatchEvent(new PointerEvent('pointerover', { ...base, ...ptr, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent('mouseover', { ...base, buttons: 0 }));
+    target.dispatchEvent(new PointerEvent('pointermove', { ...base, ...ptr, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent('mousemove', { ...base, buttons: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerdown', { ...base, ...ptr, button: 0, buttons: 1 }));
     target.dispatchEvent(new MouseEvent('mousedown', { ...base, button: 0, buttons: 1 }));
-    target.dispatchEvent(new PointerEvent('pointerup', { ...base, button: 0, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+    target.dispatchEvent(new PointerEvent('pointerup', { ...base, ...ptr, button: 0, buttons: 0 }));
     target.dispatchEvent(new MouseEvent('mouseup', { ...base, button: 0, buttons: 0 }));
-    target.dispatchEvent(new MouseEvent('click', { ...base, button: 0 }));
   }
 
   function executeCardAction(el) {
     if (!el) return false;
     const target = findActionTarget(el) || el._momTvActionTarget || el;
 
-    if (isSearchInput(target) || ['INPUT', 'TEXTAREA'].includes(target.tagName)) {
-      try { target.focus(); } catch (_) {}
+    if (TextEntry.isField(target) || isSearchInput(target)) {
+      TextEntry.start(target); // FIX: enter text-entry mode (Backspace/arrows no longer navigate away)
       return true;
     }
 
@@ -1053,16 +1234,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       const cy = Math.round(rect.top + rect.height / 2);
 
       dispatchPointerSequence(target, cx, cy);
-      if (el !== target) { dispatchPointerSequence(el, cx, cy); try { el.click(); } catch (_) {} }
-      try { target.click(); } catch (_) {}
+      target.click(); // exactly one real click — .click() triggers default link navigation and SPA routers
 
-      const href = target.getAttribute && target.getAttribute('href');
-      if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
-        try {
-          const resolved = new URL(href, window.location.href).href;
-          setTimeout(() => { if (window.location.href !== resolved) window.location.href = resolved; }, 120);
-        } catch (_) {}
-      }
+      // FIX: removed the old `location.href = resolved` fallback after 120ms — it
+      // hard-reloaded SPA pages mid-router-transition and destroyed app state.
       return true;
     } catch (err) {
       console.warn('[MOM TV] executeCardAction failed:', err);
@@ -1076,8 +1251,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     try {
       const rect = el.getBoundingClientRect();
       const base = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, buttons: 0 };
-      el.dispatchEvent(new PointerEvent('pointerover', { ...base, pointerType: 'mouse', isPrimary: true }));
-      el.dispatchEvent(new PointerEvent('pointerenter', { ...base, pointerType: 'mouse', isPrimary: true }));
+      const ptr = { pointerType: 'mouse', isPrimary: true };
+      el.dispatchEvent(new PointerEvent('pointerover', { ...base, ...ptr }));
+      el.dispatchEvent(new PointerEvent('pointerenter', { ...base, ...ptr }));
+      el.dispatchEvent(new MouseEvent('mouseover', base));
       el.dispatchEvent(new MouseEvent('mouseenter', base));
       el.dispatchEvent(new MouseEvent('mousemove', base));
     } catch (_) {}
@@ -1088,7 +1265,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     try {
       const rect = el.getBoundingClientRect();
       const base = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, buttons: 0 };
-      el.dispatchEvent(new PointerEvent('pointerleave', { ...base, pointerType: 'mouse', isPrimary: true }));
+      const ptr = { pointerType: 'mouse', isPrimary: true };
+      el.dispatchEvent(new PointerEvent('pointerout', { ...base, ...ptr }));
+      el.dispatchEvent(new PointerEvent('pointerleave', { ...base, ...ptr }));
+      el.dispatchEvent(new MouseEvent('mouseout', base));
       el.dispatchEvent(new MouseEvent('mouseleave', base));
     } catch (_) {}
   }
@@ -1105,6 +1285,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     const HEADER_CACHE_TTL_MS = 1000;
 
     let invalidateTimer = null;
+    let mo = null;
+    const markedElements = new Set(); // FIX: everything we mutate (tabindex/data-tv-card) so teardown can undo it
+
     function invalidate() {
       clearTimeout(invalidateTimer);
       invalidateTimer = setTimeout(() => {
@@ -1113,21 +1296,29 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }, 120);
     }
 
-    if (typeof MutationObserver !== 'undefined') {
-      const observer = new MutationObserver(invalidate);
-      const attach = () => {
-        const root = document.body || document.documentElement;
-        if (root && root.nodeType) {
-          try {
-            observer.observe(root, { childList: true, subtree: true, characterData: false, attributes: false });
-          } catch (_) {}
-        }
-      };
-      if (document.body || document.documentElement) {
-        attach();
+    function attachObserver() {
+      if (typeof MutationObserver === 'undefined') return;
+      mo = new MutationObserver(invalidate);
+      const root = document.body || document.documentElement;
+      if (root && root.nodeType) {
+        try { mo.observe(root, { childList: true, subtree: true }); } catch (_) {}
       } else {
-        document.addEventListener('DOMContentLoaded', attach, { once: true });
+        document.addEventListener('DOMContentLoaded', attachObserver, { once: true });
       }
+    }
+    attachObserver();
+
+    // FIX: scroll and resize invalidate the caches too — rects are viewport-relative,
+    // so the old caches went stale the moment the page scrolled.
+    const onScrollResize = () => { if (!engineDeactivated) invalidate(); };
+    window.addEventListener('scroll', onScrollResize, { capture: true, passive: true });
+    window.addEventListener('resize', onScrollResize, { passive: true });
+
+    function disconnect() {
+      try { if (mo) mo.disconnect(); } catch (_) {}
+      try { window.removeEventListener('scroll', onScrollResize, { capture: true }); } catch (_) {}
+      try { window.removeEventListener('resize', onScrollResize); } catch (_) {}
+      clearTimeout(invalidateTimer);
     }
 
     function isVisible(el) {
@@ -1149,11 +1340,12 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
     function isJunkElement(el) {
       if (!el || el.nodeType !== 1) return true;
-      if (el.closest('#momtv-exit-backdrop, #momtv-exit-dialog, #momtv-hud-pill, #momtv-player-action-bar, .momtv-internal')) return true;
+      if (el.closest('#momtv-exit-backdrop, #momtv-exit-dialog, #momtv-hud-pill, #momtv-player-action-bar, #momtv-now-playing, #momtv-virtual-cursor, .momtv-internal')) return true;
       try {
         if ((el.matches && el.matches(JUNK_SELECTORS)) || (el.closest && el.closest(JUNK_SELECTORS))) return true;
       } catch (_) {}
-      const txt = (el.innerText || '').trim().toLowerCase();
+      // FIX: textContent instead of innerText — innerText forces a layout reflow per element.
+      const txt = (el.textContent || '').trim().toLowerCase();
       if (txt.length > 0 && txt.length < 60 && /privacy policy|terms of service|copyright|cookie policy|all rights reserved/i.test(txt)) return true;
       return false;
     }
@@ -1162,12 +1354,21 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       return Boolean(el && el.closest && el.closest('header, nav, [role="navigation"], #masthead, .header-bar, .navbar, .nav-bar, #header'));
     }
 
-    function isPrimaryActionButton(el) {
+    function isPrimaryActionButton(el, rect) {
       if (!el) return false;
       if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') {
-        const rect = el.getBoundingClientRect();
         return rect.width >= 50 && rect.height >= 24;
       }
+      return false;
+    }
+
+    /** FIX: hint-matched containers must actually do something when clicked. */
+    function looksClickable(el) {
+      try {
+        if (el.getAttribute('role') === 'button' || el.getAttribute('role') === 'link' || el.hasAttribute('onclick')) return true;
+        if (el.querySelector('a[href],button,[role="button"],[role="link"]')) return true;
+        if (window.getComputedStyle(el).cursor === 'pointer') return true;
+      } catch (_) {}
       return false;
     }
 
@@ -1186,6 +1387,30 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     };
     const CARD_SELECTORS = Object.values(CARD_SELECTOR_GROUPS).join(', ');
 
+    function markCard(card) {
+      if (!markedElements.has(card)) {
+        card.__momTvOrigTabindex = card.getAttribute('tabindex'); // null when absent
+        markedElements.add(card);
+      }
+      if (!card.hasAttribute('tabindex') || card.getAttribute('tabindex') === '-1') card.setAttribute('tabindex', '0');
+      card.setAttribute('data-tv-card', 'true');
+    }
+
+    /** FIX: undo every DOM mutation we made — the extension's scanner treats
+     *  [tabindex] as interactive, so leftover markers would pollute its targets. */
+    function cleanupMarkers() {
+      for (const el of markedElements) {
+        try {
+          if (el.__momTvOrigTabindex === null || el.__momTvOrigTabindex === undefined) el.removeAttribute('tabindex');
+          else el.setAttribute('tabindex', el.__momTvOrigTabindex);
+          el.removeAttribute('data-tv-card');
+          delete el._momTvActionTarget;
+          delete el.__momTvOrigTabindex;
+        } catch (_) {}
+      }
+      markedElements.clear();
+    }
+
     function getFocusableCards(forceRefresh) {
       const now = Date.now();
       if (!forceRefresh && cachedCards && now - lastCardsScan < CACHE_TTL_MS) {
@@ -1194,43 +1419,56 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
 
       const candidates = [];
+      const rectOf = new Map(); // rects for this scan pass only
       for (const el of document.querySelectorAll(CARD_SELECTORS)) {
         if (isJunkElement(el) || isInHeaderNav(el) || !isVisible(el)) continue;
-        const rect = el._momTvRect || el.getBoundingClientRect();
-        const isCardGeom = rect.width >= 75 && rect.height >= 40;
-        const isBtnGeom = isPrimaryActionButton(el) && rect.width >= 40 && rect.height >= 20;
+        // FIX: ALWAYS a fresh rect. The old `el._momTvRect || ...` cache was never
+        // cleared, so after the first scroll every decision used pre-scroll coordinates.
+        const rect = el.getBoundingClientRect();
+        rectOf.set(el, rect);
+
         const tag = (el.tagName || '').toUpperCase();
+        const nativeInteractive = ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'].includes(tag);
+
+        // FIX: whole-page/whole-tray hint matches (e.g. [data-testid*="tray"]) are not
+        // cards — they became one giant focusable blob. Text-only matches are dropped too.
+        if (!nativeInteractive && rect.width > window.innerWidth * 0.92 && rect.height > window.innerHeight * 0.6) continue;
+        if (!nativeInteractive && !looksClickable(el)) continue;
+
+        const isCardGeom = rect.width >= 75 && rect.height >= 40;
+        const isBtnGeom = isPrimaryActionButton(el, rect) && rect.width >= 40 && rect.height >= 20;
         const isSmallInteractive = (['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(tag) || el.hasAttribute('tabindex')) && rect.width >= 16 && rect.height >= 16;
         if (!isCardGeom && !isBtnGeom && !isSmallInteractive) continue;
-        el._momTvRect = rect;
         candidates.push(el);
       }
 
       const unique = [];
+      const seen = new Set();
       for (let i = 0; i < candidates.length; i++) {
         const c1 = candidates[i];
+        const r1 = rectOf.get(c1) || c1.getBoundingClientRect();
         let dominated = false;
         for (let j = 0; j < candidates.length; j++) {
           if (i === j) continue;
           const c2 = candidates[j];
           if (c2.contains(c1)) {
-            const r2 = c2._momTvRect, r1 = c1._momTvRect;
+            const r2 = rectOf.get(c2) || c2.getBoundingClientRect();
             if (r2.width > r1.width * 1.8) continue;
             c2._momTvActionTarget = findActionTarget(c1) || c1;
             dominated = true;
             break;
           }
         }
-        if (!dominated && !unique.includes(c1)) {
-          if (!c1._momTvActionTarget) c1._momTvActionTarget = findActionTarget(c1) || c1;
+        if (!dominated && !seen.has(c1)) {
+          seen.add(c1);
+          // FIX: recomputed every scan — the old "only if absent" cache kept clicking
+          // detached inner links after SPA re-renders.
+          c1._momTvActionTarget = findActionTarget(c1) || c1;
           unique.push(c1);
         }
       }
 
-      for (const card of unique) {
-        if (!card.hasAttribute('tabindex') || card.getAttribute('tabindex') === '-1') card.setAttribute('tabindex', '0');
-        card.setAttribute('data-tv-card', 'true');
-      }
+      for (const card of unique) markCard(card);
 
       cachedCards = unique;
       lastCardsScan = Date.now();
@@ -1254,19 +1492,18 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       const valid = [];
       for (const el of document.querySelectorAll(HEADER_SELECTORS)) {
         if (isJunkElement(el) || !isVisible(el)) continue;
-        const rect = el.getBoundingClientRect();
-        el._momTvRect = rect;
+        const rect = el.getBoundingClientRect(); // FIX: fresh rect (no stale cache)
         if (isSearchInput(el)) { if (rect.width >= 60 && rect.height >= 24) valid.push(el); }
         else if (rect.width >= 45 && rect.height >= 24) valid.push(el);
       }
-      valid.sort((a, b) => (a._momTvRect.left - b._momTvRect.left));
+      valid.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
 
       cachedHeaderItems = valid;
       lastHeaderScan = Date.now();
       return valid;
     }
 
-    return { getFocusableCards, getHeaderItems, isVisible, isJunkElement, isInHeaderNav, invalidate };
+    return { getFocusableCards, getHeaderItems, isVisible, isJunkElement, isInHeaderNav, invalidate, disconnect, cleanupMarkers };
   })();
 
   /* ==========================================================================
@@ -1275,13 +1512,35 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   const SpatialNav = (() => {
     let currentFocused = null;
     let inHeaderMode = false;
+    let moveGen = 0;        // FIX: generation counter cancels stale boundary retries
+    let hoverTimer = null;  // FIX: hover only after the user RESTS on an item
+    let hoveredEl = null;
+
+    function unhover() {
+      clearTimeout(hoverTimer);
+      if (hoveredEl) { emulateMouseLeave(hoveredEl); hoveredEl = null; }
+    }
+
+    /**
+     * FIX: hover previews fire only after a 450ms rest, never on nav bars and never
+     * on fields. Firing on every step opened dropdowns/expanded cards that then
+     * covered the next navigation target.
+     */
+    function scheduleHover(el) {
+      clearTimeout(hoverTimer);
+      if (engineDeactivated) return;
+      if (CardDiscovery.isInHeaderNav(el) || TextEntry.isField(el)) return;
+      hoverTimer = setTimeout(() => {
+        if (!engineDeactivated && currentFocused === el) { emulateMouseHover(el); hoveredEl = el; }
+      }, 450);
+    }
 
     function buildRows(cards) {
       if (!cards.length) return [];
       const scrollX = window.scrollX || 0, scrollY = window.scrollY || 0;
 
       const items = cards.map((el) => {
-        const rect = el._momTvRect || el.getBoundingClientRect();
+        const rect = el.getBoundingClientRect(); // FIX: fresh
         const top = rect.top + scrollY;
         return { el, rect, top, bottom: top + rect.height, left: rect.left + scrollX, right: rect.left + scrollX + rect.width, centerX: rect.left + scrollX + rect.width / 2, centerY: top + rect.height / 2, height: rect.height };
       });
@@ -1307,18 +1566,6 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       rows.sort((a, b) => a.top - b.top);
       rows.forEach(r => r.cards.sort((a, b) => a.left - b.left));
       return rows;
-    }
-
-    function findVerticalScrollContainer(el) {
-      let node = el ? el.parentElement : null;
-      while (node && node !== document.body && node !== document.documentElement) {
-        if (node.scrollHeight > node.clientHeight + 40) {
-          const oy = window.getComputedStyle(node).overflowY;
-          if (oy === 'auto' || oy === 'scroll') return node;
-        }
-        node = node.parentElement;
-      }
-      return window;
     }
 
     function tryPaginateCarousel(cardEl, direction) {
@@ -1348,7 +1595,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const diffY = (rect.top + rect.height / 2) - window.innerHeight * 0.40;
-      const container = findVerticalScrollContainer(el);
+      const container = findScrollContainer(el);
       if (container !== window) container.scrollBy({ top: diffY, behavior: 'smooth' });
       else if (Math.abs(diffY) > 20) window.scrollBy({ top: diffY, behavior: 'smooth' });
 
@@ -1368,24 +1615,42 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     }
 
     function setFocus(el) {
+      moveGen++; // FIX: any focus change invalidates pending boundary retries
+      injectLeanbackStyles(); // FIX: focus classes need our stylesheet present
+      unhover();
       if (currentFocused && currentFocused !== el) {
         currentFocused.classList.remove('momtv-card-focused', 'momtv-focused', 'momtv-focused-input');
         emulateMouseLeave(currentFocused);
+        TextEntry.stop(); // FIX: leaving a field exits text-entry mode
       }
       currentFocused = el;
       if (!el) return;
 
       inHeaderMode = CardDiscovery.isInHeaderNav(el);
-      el.classList.add(isSearchInput(el) ? 'momtv-focused-input' : 'momtv-card-focused', ...(isSearchInput(el) ? [] : ['momtv-focused']));
+      const isFieldEl = TextEntry.isField(el) || isSearchInput(el);
+      if (isFieldEl) el.classList.add('momtv-focused-input');
+      else el.classList.add('momtv-card-focused', 'momtv-focused');
       try { el.focus({ preventScroll: true }); } catch (_) {}
       scrollIntoComfortZone(el);
-      emulateMouseHover(el);
+      scheduleHover(el);
       playSound('focus');
+    }
+
+    /** FIX: full visual cleanup used when the extension takes over — no orphan
+     *  cyan outline may remain on the page. */
+    function clearFocusVisual() {
+      unhover();
+      if (currentFocused) {
+        currentFocused.classList.remove('momtv-card-focused', 'momtv-focused', 'momtv-focused-input');
+        emulateMouseLeave(currentFocused);
+        currentFocused = null;
+      }
+      inHeaderMode = false;
     }
 
     function findSpatialCandidate(fromEl, direction, cardPool) {
       if (!fromEl) return null;
-      const curRect = fromEl._momTvRect || fromEl.getBoundingClientRect();
+      const curRect = fromEl.getBoundingClientRect(); // FIX: fresh
       const curCX = curRect.left + curRect.width / 2, curCY = curRect.top + curRect.height / 2;
 
       const candidates = Array.from(new Set([...(cardPool || CardDiscovery.getFocusableCards()), ...CardDiscovery.getHeaderItems()]));
@@ -1393,7 +1658,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
       for (const el of candidates) {
         if (el === fromEl || !CardDiscovery.isVisible(el) || CardDiscovery.isJunkElement(el)) continue;
-        const rect = el._momTvRect || el.getBoundingClientRect();
+        const rect = el.getBoundingClientRect(); // FIX: fresh
         const elCX = rect.left + rect.width / 2, elCY = rect.top + rect.height / 2;
 
         let valid = false, primary = 0, secondary = 0, overlap = false;
@@ -1422,6 +1687,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     }
 
     function autoFocusFirst() {
+      if (engineDeactivated) return; // FIX: never fight the extension's autofocus
       if (isYouTubeTVPage() || isInternalMomTVPage()) return;
       if (currentFocused && isElementInDoc(currentFocused)) return;
 
@@ -1429,7 +1695,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       if (cards.length) {
         let best = cards[0], bestScore = Infinity;
         for (const c of cards) {
-          const r = c._momTvRect || c.getBoundingClientRect();
+          const r = c.getBoundingClientRect(); // FIX: fresh
           if (r.top >= 0 && r.left >= 0 && r.top < window.innerHeight && r.left < window.innerWidth) {
             const s = r.top * 1.5 + r.left;
             if (s < bestScore) { bestScore = s; best = c; }
@@ -1442,10 +1708,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
     }
 
-    if (typeof document !== 'undefined' && document.readyState === 'complete') setTimeout(autoFocusFirst, 350);
-    else if (typeof window !== 'undefined') window.addEventListener('load', () => setTimeout(autoFocusFirst, 350), { once: true });
-
     function moveFocus(direction) {
+      if (engineDeactivated) return false;
+      moveGen++; // FIX: a fresh user move cancels any retry still pending
+
       if (!currentFocused || !isElementInDoc(currentFocused)) {
         autoFocusFirst();
         return Boolean(currentFocused);
@@ -1457,7 +1723,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
         if (!headers.length) { inHeaderMode = false; }
         else {
           let idx = headers.indexOf(currentFocused);
-          if (idx === -1) idx = 0;
+          if (idx === -1) { setFocus(headers[0]); return true; } // FIX: was idx=0, which made Right skip item 0
 
           if (direction === 'left') { if (idx > 0) setFocus(headers[idx - 1]); else playSound('focus'); return true; }
           if (direction === 'right') { if (idx < headers.length - 1) setFocus(headers[idx + 1]); else playSound('focus'); return true; }
@@ -1505,7 +1771,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
           if (headers.length) {
             inHeaderMode = true;
             setFocus(headers.reduce((a, b) => {
-              const ra = a._momTvRect || a.getBoundingClientRect(), rb = b._momTvRect || b.getBoundingClientRect();
+              const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
               return Math.abs((rb.left + rb.width / 2) - card.centerX) < Math.abs((ra.left + ra.width / 2) - card.centerX) ? b : a;
             }));
             return true;
@@ -1517,26 +1783,37 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       const spatial = findSpatialCandidate(currentFocused, direction, cards);
       if (spatial) { inHeaderMode = CardDiscovery.isInHeaderNav(spatial); setFocus(spatial); return true; }
 
-      // Boundary: paginate a carousel or scroll the page, then retry.
+      // Boundary: paginate a carousel or scroll the page, then retry ONCE — and only
+      // if the user has not moved again in the meantime (FIX: move-generation guard).
       if (direction === 'right' || direction === 'left') {
         const paginated = tryPaginateCarousel(currentFocused, direction);
         playSound('focus');
         if (paginated) {
           HUD.show(direction === 'right' ? 'More' : 'Previous');
           CardDiscovery.invalidate();
-          setTimeout(() => { const next = findSpatialCandidate(currentFocused, direction); if (next) setFocus(next); }, 240);
+          const gen = moveGen, el = currentFocused, dir = direction;
+          setTimeout(() => {
+            if (gen !== moveGen || engineDeactivated || !el || !isElementInDoc(el)) return;
+            const next = findSpatialCandidate(el, dir);
+            if (next) setFocus(next);
+          }, 240);
         }
         return true;
       }
 
       if (direction === 'down' || direction === 'up') {
-        const container = findVerticalScrollContainer(currentFocused);
+        const container = findScrollContainer(currentFocused);
         const shift = Math.round(window.innerHeight * 0.55) * (direction === 'down' ? 1 : -1);
         (container === window ? window : container).scrollBy({ top: shift, behavior: 'smooth' });
         playSound('focus');
         HUD.show(direction === 'down' ? 'Loading More...' : 'Scrolling Up', direction === 'down' ? 'down' : 'up');
         CardDiscovery.invalidate();
-        setTimeout(() => { const next = findSpatialCandidate(currentFocused, direction); if (next) setFocus(next); }, 300);
+        const gen = moveGen, el = currentFocused, dir = direction;
+        setTimeout(() => {
+          if (gen !== moveGen || engineDeactivated || !el || !isElementInDoc(el)) return;
+          const next = findSpatialCandidate(el, dir);
+          if (next) setFocus(next);
+        }, 300);
         return true;
       }
 
@@ -1544,7 +1821,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     }
 
     return {
-      moveFocus, setFocus, autoFocusFirst,
+      moveFocus, setFocus, autoFocusFirst, clearFocusVisual,
       getFocused: () => currentFocused
     };
   })();
@@ -1556,6 +1833,29 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     let lastPressTime = 0;
     let consecutivePresses = 0;
 
+    // FIX: cookie banners / consent walls / site modals now close on Back instead of
+    // leaving the D-pad dead-ended behind them.
+    const MODAL_SELECTORS = '[aria-modal="true"],dialog[open],[role="dialog"],[role="alertdialog"],#onetrust-banner-sdk,#onetrust-consent-sdk,#CybotCookiebotDialog,[id*="cookie" i][id*="banner" i],[class*="cookie" i][class*="banner" i],[class*="consent" i][class*="banner" i]';
+
+    function tryCloseTopModal() {
+      const modals = document.querySelectorAll(MODAL_SELECTORS);
+      for (let i = modals.length - 1; i >= 0; i--) {
+        const m = modals[i];
+        const r = m.getBoundingClientRect();
+        if (r.width < 150 || r.height < 40 || !CardDiscovery.isVisible(m)) continue;
+        const btn = m.querySelector('[aria-label*="close" i],[aria-label*="dismiss" i],[data-dismiss],[data-testid*="close" i],button.close,.close');
+        if (btn && CardDiscovery.isVisible(btn)) { btn.click(); return true; }
+        if (!/cookie|consent|onetrust/i.test((m.id || '') + ' ' + (m.className || ''))) {
+          const opts = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+          [document.activeElement, m].forEach((t) => {
+            if (t && t.dispatchEvent) { t.dispatchEvent(keyEvent('keydown', opts)); t.dispatchEvent(keyEvent('keyup', opts)); }
+          });
+          return true;
+        }
+      }
+      return false;
+    }
+
     function isAtAppRoot() {
       const p = (window.location.pathname || '').toLowerCase();
       const rootPaths = ['/', '', '/browse', '/home', '/in', '/in/home', '/in/explore', '/tv'];
@@ -1563,16 +1863,20 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     }
 
     function goBack() {
+      if (engineDeactivated) return false;
       playSound('back');
 
       if (ExitDialog.isOpen) { ExitDialog.hide(); return true; }
       if (PlayerActionBar.isVisible) { PlayerActionBar.hide(); return true; }
+      if (TextEntry.editing) { TextEntry.stop(); return true; } // FIX: Back first leaves text entry
+
+      if (tryCloseTopModal()) return true;
       if (PlatformAdapters.handleBack()) return true;
 
       if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); HUD.show('Exit Fullscreen', 'windowed'); return true; }
 
       const video = VideoControl.getActiveVideo();
-      if (video && !video.paused) { video.pause(); HUD.show('Paused', 'pause'); VideoControl.markDisengaged(); return true; }
+      if (video && !video.paused && VideoControl.isVideoModeActive()) { video.pause(); HUD.show('Paused', 'pause'); VideoControl.markDisengaged(); return true; }
 
       const now = Date.now();
       consecutivePresses = (now - lastPressTime < 1800) ? consecutivePresses + 1 : 1;
@@ -1600,6 +1904,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     let el = null;
 
     function ensureElement() {
+      if (engineDeactivated) return null; // FIX
+      injectLeanbackStyles(); // FIX
       el = document.getElementById('momtv-virtual-cursor');
       if (el) return el;
       const target = document.body || document.documentElement;
@@ -1660,6 +1966,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     }
 
     function click() {
+      if (engineDeactivated) return; // FIX
       show();
       const e = ensureElement();
       if (e) {
@@ -1671,122 +1978,31 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       try {
         const target = document.elementFromPoint(x, y);
         if (target && !target.closest('#momtv-virtual-cursor, .momtv-internal')) {
-          if (isSearchInput(target) || ['INPUT', 'TEXTAREA'].includes(target.tagName)) { try { target.focus(); } catch (_) {} }
-          dispatchPointerSequence(target, x, y);
-          try { target.click(); } catch (_) {}
-
-          const innerAction = target.querySelector('.play-button, [class*="play-btn" i], [class*="playButton" i], [data-testid*="play" i], [aria-label*="Play" i], button, a[href]');
-          if (innerAction && innerAction !== target) { try { innerAction.click(); } catch (_) {} }
+          // FIX: fields enter text-entry mode instead of just being focused.
+          if (TextEntry.isField(target) || isSearchInput(target)) { TextEntry.start(target, true); }
+          else {
+            // FIX: exactly ONE activation — the old code also clicked the first inner
+            // ".play-button/button/a" it found, double-firing menus and toggles.
+            dispatchPointerSequence(target, x, y);
+            try { target.click(); } catch (_) {}
+          }
         }
       } catch (err) { console.warn('[MOM TV] cursor click failed:', err); }
 
       resetAutoHide();
     }
 
-    return { set, moveBy, click, hide };
+    /** NEW: remote API parity with the extension engine (trackpad scroll). */
+    function scrollByPx(dy) {
+      try {
+        const t = document.elementFromPoint(x, y);
+        const container = findScrollContainer(t || document.body);
+        (container === window ? window : container).scrollBy({ top: dy });
+      } catch (_) {}
+    }
+
+    return { set, moveBy, click, scrollBy: scrollByPx, hide };
   })();
-
-  /* ==========================================================================
-     13. PUBLIC API — window.MomTV.handleKey(name)
-     ========================================================================== */
-  const ENGINE_DEBOUNCE_MS = 140;
-  let lastHandledAt = 0;
-
-  window.MomTV = {
-    handleKey(rawKey) {
-      const k = (rawKey || '').toLowerCase();
-      const now = Date.now();
-
-      if (ExitDialog.isOpen) return ExitDialog.handleKey(k);
-
-      if (isYouTubeTVPage()) return k === 'back' ? BackNav.goBack() : false; // Cobalt handles the rest natively
-
-      if (isInternalMomTVPage() || document.querySelector('.tv-shell')) return k === 'back' ? BackNav.goBack() : false;
-
-      if (['up', 'down', 'left', 'right', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) VirtualCursor.hide();
-
-      if (now - lastHandledAt < ENGINE_DEBOUNCE_MS) return true;
-
-      const video = VideoControl.getActiveVideo();
-      if (PlatformAdapters.dispatch(k, video)) { lastHandledAt = Date.now(); return true; }
-      if (video && VideoControl.isVideoModeActive() && VideoControl.handleKey(k, video)) { lastHandledAt = Date.now(); return true; }
-
-      if (['f', 'fullscreen'].includes(k)) {
-        if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); HUD.show('Windowed', 'windowed'); }
-        else {
-          const target = (video && video.parentElement) || video || document.documentElement;
-          if (target && target.requestFullscreen) { target.requestFullscreen().catch(() => {}); HUD.show('Fullscreen', 'fullscreen'); }
-        }
-        playSound('select');
-        lastHandledAt = Date.now();
-        return true;
-      }
-
-      if (['up', 'down', 'left', 'right', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
-        const dir = k.replace('arrow', '');
-        const handled = SpatialNav.moveFocus(dir);
-        if (handled) lastHandledAt = Date.now();
-        return handled;
-      }
-
-      if (['enter', 'ok', 'select'].includes(k)) {
-        if (!SpatialNav.getFocused() || !isElementInDoc(SpatialNav.getFocused())) SpatialNav.autoFocusFirst();
-        const focused = SpatialNav.getFocused();
-        if (focused) {
-          playSound('select');
-          HUD.show('Selected', 'check');
-          const res = executeCardAction(focused);
-          lastHandledAt = Date.now();
-          return res;
-        }
-      }
-
-      if (['back', 'escape'].includes(k)) {
-        const res = BackNav.goBack();
-        if (res) lastHandledAt = Date.now();
-        return res;
-      }
-
-      if (['f12', 'devtools'].includes(k)) {
-        toggleDevTools();
-        lastHandledAt = Date.now();
-        return true;
-      }
-
-      return false;
-    },
-
-    goBack: BackNav.goBack,
-    isExitDialogOpen: () => ExitDialog.isOpen,
-    showExitDialog: ExitDialog.show,
-    hideExitDialog: ExitDialog.hide,
-    getActiveVideo: VideoControl.getActiveVideo,
-    setFocus: SpatialNav.setFocus,
-    getFocusedElement: SpatialNav.getFocused,
-    showHUD: HUD.show,
-    showVideoOSD: HUD.showVideoProgress,
-    showPlayerActionBar: PlayerActionBar.show,
-    hidePlayerActionBar: PlayerActionBar.hide,
-    playSound,
-    dumpState() {
-      return {
-        videoMode: VideoControl.isVideoModeActive(),
-        focusedCard: SpatialNav.getFocused()?.textContent?.slice(0, 50),
-        totalCards: CardDiscovery.getFocusableCards().length,
-        platform: 'generic',
-        url: location.href,
-      };
-    },
-    getFocusableCards: CardDiscovery.getFocusableCards,
-    invalidateCardsCache: CardDiscovery.invalidate,
-    executeCardAction,
-    emulateMouseHover,
-    moveCursor: VirtualCursor.moveBy,
-    setCursor: VirtualCursor.set,
-    clickCursor: VirtualCursor.click,
-    PlatformAdapters,
-    toggleDevTools
-  };
 
   /* ==========================================================================
      13b. DEVTOOLS CONSOLE & INSPECTOR CONTROLLER
@@ -1808,7 +2024,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       if (!target) return false;
 
       const script = document.createElement('script');
-      script.src = '/static/eruda.min.js';
+      // FIX: absolute HOME origin. The old relative '/static/eruda.min.js' resolved
+      // against the CURRENT site (netflix.com/static/... → 404) everywhere except
+      // localhost, so the public CDN fallback did all the work.
+      script.src = ERUDA_HOME_URL;
       script.onload = () => {
         try {
           if (window.eruda) {
@@ -1841,8 +2060,42 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   }
 
   /* ==========================================================================
-     14. PHYSICAL KEYBOARD BRIDGE
+     14. EXTENSION HANDSHAKE, PUBLIC API & PHYSICAL KEYBOARD BRIDGE
+     CDP scripts run BEFORE extension content scripts, so the early "yield if a
+     frozen MomTV exists" check usually finds nothing and both engines start.
+     The extension then replaces window.MomTV with its own frozen API — these
+     helpers detect that AT ANY TIME and tear this engine down completely
+     (UI nodes, style tag, listeners, observer, tabindex markers, hover state).
      ========================================================================== */
+  let ownAPI = null;
+  let watchTimer = null;
+  let lastHandledAt = 0;
+  let lastKeydownAt = 0;
+  let engaged = false;
+
+  function extensionTookOver() {
+    try {
+      const d = Object.getOwnPropertyDescriptor(window, 'MomTV');
+      // Our own API is never frozen; the extension's always is.
+      return !!(d && d.value && Object.isFrozen(d.value) && d.value !== ownAPI);
+    } catch (_) { return false; }
+  }
+
+  function deactivateEngine() {
+    if (engineDeactivated) return;
+    engineDeactivated = true;
+    clearInterval(watchTimer);
+    try { document.removeEventListener('keydown', onPhysicalKeydown, true); } catch (_) {}
+    // Remove every DOM artifact we created.
+    ['momtv-companion-styles', 'momtv-exit-backdrop', 'momtv-hud-pill', 'momtv-player-action-bar', 'momtv-virtual-cursor', 'momtv-now-playing'].forEach((id) => {
+      const n = document.getElementById(id);
+      if (n && n.remove) n.remove();
+    });
+    try { SpatialNav.clearFocusVisual(); } catch (_) {}
+    try { CardDiscovery.cleanupMarkers(); CardDiscovery.disconnect(); } catch (_) {}
+    console.log('[MOM TV Engine] Extension engine took over — CDP fallback deactivated cleanly.');
+  }
+
   const KEY_MAP = {
     ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
     Enter: 'ok', ' ': 'ok', Escape: 'back', Backspace: 'back', BrowserBack: 'back',
@@ -1850,36 +2103,219 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     MediaTrackPrevious: 'rewind', MediaTrackNext: 'forward'
   };
 
-  let lastKeydownAt = 0;
+  function onPhysicalKeydown(e) {
+    if (!e.isTrusted) return; // ignore synthetic events to prevent feedback loops with CDP
+    if (engineDeactivated) return;
+    // FIX: the old check only skipped handling — it left our UI, observer and markers
+    // in the page. Now the first keypress after a takeover triggers a full teardown.
+    if (extensionTookOver()) { deactivateEngine(); return; }
 
-  if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes((e.key || '').toUpperCase()))) {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleDevTools();
-        return;
+    const key = e.key || '';
+
+    if (key === 'F12' || (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes((key || '').toUpperCase()))) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleDevTools();
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const mapped = KEY_MAP[key];
+    const active = document.activeElement;
+
+    // FIX: text entry. While editing, printable keys (incl. Backspace/Delete) must
+    // reach the field — Backspace used to trigger history.back() and wipe the input.
+    if (TextEntry.editing) {
+      if (key === 'Escape' || key === 'ArrowUp' || key === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation();
+        if (ownAPI) ownAPI.handleKey(mapped);
+      } else if (key === 'Enter' && active && active.tagName !== 'TEXTAREA') {
+        setTimeout(() => TextEntry.stop(), 0);
       }
+      return; // everything else is real typing
+    }
 
-      const mapped = KEY_MAP[e.key];
-      if (!mapped) return;
+    // Typing into a field that was not OK-activated: start editing silently.
+    if (TextEntry.isField(active) && (key.length === 1 || key === 'Backspace' || key === 'Delete')) {
+      TextEntry.start(active, true);
+      return;
+    }
 
-      if (isInternalMomTVPage() || document.querySelector('.tv-shell')) {
-        if (mapped === 'back' && window.MomTV.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
-        return;
-      }
+    if (!mapped) return;
 
-      const now = Date.now();
-      if (now - lastKeydownAt < ENGINE_DEBOUNCE_MS) { e.preventDefault(); e.stopPropagation(); return; }
+    if (isInternalMomTVPage() || document.querySelector('.tv-shell')) {
+      if (mapped === 'back' && ownAPI && ownAPI.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
+      return;
+    }
 
-      const active = document.activeElement;
-      const isTyping = active && (['INPUT', 'TEXTAREA'].includes(active.tagName) || active.isContentEditable);
-      if (isTyping && ['ArrowLeft', 'ArrowRight'].includes(e.key) && !active.classList.contains('momtv-focused-input')) return;
+    const now = Date.now();
+    if (now - lastKeydownAt < ENGINE_DEBOUNCE_MS) { e.preventDefault(); e.stopPropagation(); return; }
 
-      lastKeydownAt = now;
-      if (window.MomTV.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
-    }, true);
+    lastKeydownAt = now;
+    // FIX: call through our own reference — pages sometimes clobber window.MomTV.
+    if (ownAPI && ownAPI.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
   }
 
-  console.log('✅ [MOM TV Companion 2.0] TV engine ready. window.MomTV is live.');
+  function buildAPI() {
+    return {
+      handleKey(rawKey) {
+        if (engineDeactivated) return false;
+        if (extensionTookOver()) { deactivateEngine(); return false; }
+
+        const k = (rawKey || '').toLowerCase();
+        const now = Date.now();
+
+        if (ExitDialog.isOpen) return ExitDialog.handleKey(k);
+        if (isYouTubeTVPage()) return k === 'back' ? BackNav.goBack() : false; // Cobalt handles the rest natively
+        if (isInternalMomTVPage() || document.querySelector('.tv-shell')) return k === 'back' ? BackNav.goBack() : false;
+
+        if (['up', 'down', 'left', 'right', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) VirtualCursor.hide();
+
+        if (now - lastHandledAt < ENGINE_DEBOUNCE_MS) return true;
+        lastHandledAt = now;
+
+        // FIX: text-entry mode for the D-pad (Back exits, OK submits, left/right move
+        // the caret, up/down leave the field and navigate).
+        if (TextEntry.editing) {
+          if (['back', 'escape'].includes(k)) { TextEntry.stop(); return true; }
+          if (['enter', 'ok', 'select', 'space'].includes(k)) { TextEntry.submit(); TextEntry.stop(); return true; }
+          if (['left', 'arrowleft', 'right', 'arrowright'].includes(k)) { TextEntry.moveCaret(k.includes('left') ? -1 : 1); return true; }
+          TextEntry.stop(); // up/down leave the field and navigate
+        }
+
+        const video = VideoControl.getActiveVideo();
+        if (PlatformAdapters.dispatch(k, video)) return true;
+        if (video && VideoControl.isVideoModeActive() && VideoControl.handleKey(k, video)) return true;
+
+        if (['f', 'fullscreen'].includes(k)) {
+          if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); HUD.show('Windowed', 'windowed'); }
+          else {
+            const target = (video && video.parentElement) || video || document.documentElement;
+            if (target && target.requestFullscreen) { target.requestFullscreen().catch(() => {}); HUD.show('Fullscreen', 'fullscreen'); }
+          }
+          playSound('select');
+          return true;
+        }
+
+        if (['up', 'down', 'left', 'right', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+          const dir = k.replace('arrow', '');
+          return SpatialNav.moveFocus(dir);
+        }
+
+        if (['enter', 'ok', 'select'].includes(k)) {
+          if (!SpatialNav.getFocused() || !isElementInDoc(SpatialNav.getFocused())) SpatialNav.autoFocusFirst();
+          const focused = SpatialNav.getFocused();
+          if (focused) {
+            playSound('select');
+            HUD.show('Selected', 'check');
+            return executeCardAction(focused);
+          }
+        }
+
+        if (['back', 'escape'].includes(k)) return BackNav.goBack();
+
+        if (['f12', 'devtools'].includes(k)) {
+          toggleDevTools();
+          return true;
+        }
+
+        return false;
+      },
+
+      goBack: BackNav.goBack,
+      isExitDialogOpen: () => ExitDialog.isOpen,
+      showExitDialog: ExitDialog.show,
+      hideExitDialog: ExitDialog.hide,
+      getActiveVideo: VideoControl.getActiveVideo,
+      setFocus: SpatialNav.setFocus,
+      getFocusedElement: SpatialNav.getFocused,
+      showHUD: HUD.show,
+      showVideoOSD: HUD.showVideoProgress,
+      showPlayerActionBar: PlayerActionBar.show,
+      hidePlayerActionBar: PlayerActionBar.hide,
+      playSound,
+      dumpState() {
+        const f = SpatialNav.getFocused();
+        return {
+          videoMode: VideoControl.isVideoModeActive(),
+          focusedCard: f ? (f.textContent || f.getAttribute('aria-label') || f.tagName || '').trim().slice(0, 50) : null,
+          totalCards: CardDiscovery.getFocusableCards().length,
+          platform: 'generic',
+          editing: TextEntry.editing,
+          url: location.href
+        };
+      },
+      getFocusableCards: CardDiscovery.getFocusableCards,
+      invalidateCardsCache: CardDiscovery.invalidate,
+      executeCardAction,
+      emulateMouseHover,
+      // FIX: phone-remote text entry — these were missing entirely, so the remote's
+      // typing buttons crashed ("MomTV.typeText is not a function") in CDP mode.
+      typeText: TextEntry.insert,
+      backspace: TextEntry.backspace,
+      submitText: TextEntry.submit,
+      moveCursor: VirtualCursor.moveBy,
+      setCursor: VirtualCursor.set,
+      clickCursor: VirtualCursor.click,
+      scrollBy: VirtualCursor.scrollBy,
+      PlatformAdapters,
+      toggleDevTools
+    };
+  }
+
+  function installAPI() {
+    if (extensionTookOver()) { deactivateEngine(); return false; }
+    try {
+      ownAPI = buildAPI();
+      // Deliberately writable + configurable so the extension's engine can replace
+      // us — and if it already froze the property, the throw is caught and we tear down
+      // instead of dying half-initialized with UI and observers leaked into the page.
+      window.MomTV = ownAPI;
+      return true;
+    } catch (_) {
+      deactivateEngine();
+      return false;
+    }
+  }
+
+  /* ---- engagement: nothing touches the page until we are sure the extension
+     is absent (it injects at document_start, so by load time it is already
+     there if it is enabled at all) ---- */
+  function engage() {
+    if (engaged) return;
+    engaged = true;
+    if (engineDeactivated || extensionTookOver()) { deactivateEngine(); return; }
+    injectLeanbackStyles();
+    setTimeout(() => {
+      if (engineDeactivated || extensionTookOver()) { deactivateEngine(); return; }
+      SpatialNav.autoFocusFirst();
+      NowPlaying.show('MOM TV Started');
+    }, 350);
+  }
+
+  function boot() {
+    if (!installAPI()) return;
+
+    document.addEventListener('keydown', onPhysicalKeydown, true);
+
+    // Takeover watcher: if the extension's engine appears at any point, step aside
+    // completely. It injects at document_start, so detection is near-instant when
+    // present; polling stops after ~30s.
+    let ticks = 0;
+    watchTimer = setInterval(() => {
+      if (extensionTookOver()) { deactivateEngine(); return; }
+      if (++ticks > 100) clearInterval(watchTimer);
+    }, 300);
+
+    if (document.readyState === 'complete') setTimeout(engage, 50);
+    else {
+      window.addEventListener('load', () => setTimeout(engage, 50), { once: true });
+      setTimeout(engage, 4000); // safety if 'load' never fires (engage is idempotent)
+    }
+
+    console.log('✅ [MOM TV Companion 2.1] TV engine ready. window.MomTV is live.');
+  }
+
+  boot();
 })();

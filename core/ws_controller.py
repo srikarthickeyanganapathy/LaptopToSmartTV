@@ -186,9 +186,9 @@ async def _cmd_key(data: dict, ws=None) -> dict:
             if k in ("reload", "refresh"):
                 await cdp_bridge.reload()
             elif k in ("zoomin", "zoom_in"):
-                combo([0x11, 0xBB])
+                await cdp_bridge.evaluate("window.MomTV?.zoomIn?.()")
             elif k in ("zoomout", "zoom_out"):
-                combo([0x11, 0xBD])
+                await cdp_bridge.evaluate("window.MomTV?.zoomOut?.()")
             elif k in ("zoomreset", "zoom_reset"):
                 combo([0x11, 0x30])
             elif k in VK_MAP:
@@ -278,8 +278,14 @@ async def _cmd_search(data: dict, ws=None) -> dict:
 async def _cmd_text(data: dict, ws=None) -> dict:
     val = data.get("value") or data.get("text", "")
     if cdp_bridge.is_connected:
-        await cdp_bridge.send("Input.insertText", {"text": val}, wait_response=False)
-    send_unicode_text(val)
+        # Prefer MomTV.typeText — it handles React/Vue synthetic input events
+        typed = await cdp_bridge.evaluate(f"window.MomTV?.typeText?.({json.dumps(val)})")
+        if not typed:
+            # Fallback to CDP raw text insertion
+            await cdp_bridge.send("Input.insertText", {"text": val}, wait_response=False)
+    else:
+        # No CDP — use Win32 keyboard simulation
+        send_unicode_text(val)
     return {"status": "ok", "cmd": "text", "typed_chars": len(val)}
 
 async def _cmd_ping(data: dict, ws=None) -> dict:
@@ -327,8 +333,10 @@ async def _cmd_mouse_scroll(data: dict, ws=None) -> dict:
     try:
         dy = float(data.get("dy", 0))
         if cdp_bridge.is_connected:
+            # Use MomTV.scrollBy — scrolls the element under the virtual cursor,
+            # not just the window. Correctly handles nested scroll containers.
             await cdp_bridge.send("Runtime.evaluate", {
-                "expression": f"window.scrollBy(0, {dy})",
+                "expression": f"window.MomTV?.scrollBy?.({dy}) ?? window.scrollBy(0, {dy})",
                 "returnByValue": False
             }, wait_response=False)
         user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(-dy), 0)

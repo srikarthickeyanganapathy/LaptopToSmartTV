@@ -133,7 +133,9 @@ class BraveKioskSupervisor:
             "--kiosk",
             f"--user-data-dir={self.profile_dir}",
             f"--remote-debugging-port={self.port}",
-            f"--user-agent={SMART_TV_UA}",
+            # NOTE: No global --user-agent here. The CDP bridge applies per-URL UA overrides
+            # (Smart TV for YouTube TV, Desktop for everything else) via Emulation.setUserAgentOverride.
+            # A global UA breaks non-YouTube sites by making them serve TV/mobile layouts.
             "--no-first-run",
             "--disable-pinch",
             "--overscroll-history-navigation=0",
