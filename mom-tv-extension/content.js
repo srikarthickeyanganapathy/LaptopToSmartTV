@@ -11,9 +11,11 @@
 (function () {
   'use strict';
 
-  if (window.__MOM_TV_ENGINE_LOADED__) return;
-  window.__MOM_TV_ENGINE_LOADED__ = true;
-  window.__MomTVLoaded = true; // kept for older host builds that check this flag
+  if (typeof window !== 'undefined') {
+    if (window.__MOM_TV_ENGINE_LOADED__) return;
+    window.__MOM_TV_ENGINE_LOADED__ = true;
+    window.__MomTVLoaded = true; // kept for older host builds that check this flag
+  }
 
   console.log('🚀 [MOM TV Companion 2.0] Initializing TV engine...');
 
@@ -24,20 +26,23 @@
      ========================================================================== */
   (function enforceSingleWindow() {
     try {
+      if (typeof window === 'undefined') return;
       window.open = function (url) {
         if (url) window.location.href = url;
         return window;
       };
 
-      document.addEventListener('click', (e) => {
-        const anchor = e.target && e.target.closest ? e.target.closest('a') : null;
-        if (anchor && anchor.target === '_blank') anchor.target = '_self';
-      }, true);
+      if (typeof document !== 'undefined' && document.addEventListener) {
+        document.addEventListener('click', (e) => {
+          const anchor = e.target && e.target.closest ? e.target.closest('a') : null;
+          if (anchor && anchor.target === '_blank') anchor.target = '_self';
+        }, true);
 
-      document.addEventListener('submit', (e) => {
-        const form = e.target;
-        if (form && form.target === '_blank') form.target = '_self';
-      }, true);
+        document.addEventListener('submit', (e) => {
+          const form = e.target;
+          if (form && form.target === '_blank') form.target = '_self';
+        }, true);
+      }
     } catch (_) { /* best-effort — a page that blocks this still just opens normally */ }
   })();
 
@@ -68,12 +73,11 @@
 
   /* ==========================================================================
      2. INJECT LEANBACK STYLES
+     Safely handles execution at document_start where document.head and
+     document.documentElement may be null. Defers until DOM is available.
      ========================================================================== */
   const STYLE_ID = 'momtv-companion-styles';
-  if (!document.getElementById(STYLE_ID)) {
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
+  const LEANBACK_CSS = `
 html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
 .momtv-icon { display: inline-flex; width: 1em; height: 1em; vertical-align: -0.14em; }
@@ -197,8 +201,41 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 #momtv-virtual-cursor.visible { opacity: 1; }
 #momtv-virtual-cursor.clicking { filter: drop-shadow(0 0 14px rgba(255, 255, 255, 1)) drop-shadow(0 0 28px rgba(0, 240, 255, 1)); transform: scale(0.85) !important; }
 `;
-    (document.head || document.documentElement).appendChild(style);
+
+  function injectLeanbackStyles() {
+    try {
+      if (typeof document === 'undefined' || !document) return;
+      if (document.getElementById(STYLE_ID)) return;
+
+      const target = document.head || document.documentElement;
+      if (target && target.appendChild) {
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = LEANBACK_CSS;
+        target.appendChild(style);
+        return;
+      }
+
+      // If run at document_start before <html> or <head> exists
+      const onReady = () => injectLeanbackStyles();
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onReady, { once: true });
+      }
+      if (typeof MutationObserver !== 'undefined') {
+        const obs = new MutationObserver(() => {
+          const t = document.head || document.documentElement;
+          if (t && t.appendChild) {
+            obs.disconnect();
+            injectLeanbackStyles();
+          }
+        });
+        try {
+          obs.observe(document, { childList: true, subtree: true });
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
+  injectLeanbackStyles();
 
   /* ==========================================================================
      3. SHARED UTILITIES
@@ -224,15 +261,17 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   }
 
   function apply10FootScaling() {
-    if (isInternalMomTVPage() || isYouTubeTVPage()) return;
-    if (document.documentElement) {
-      document.documentElement.classList.add('momtv-10ft-scaled');
-      document.documentElement.setAttribute('data-momtv-zoom', '135');
-    }
+    try {
+      if (isInternalMomTVPage() || isYouTubeTVPage()) return;
+      if (document.documentElement) {
+        document.documentElement.classList.add('momtv-10ft-scaled');
+        document.documentElement.setAttribute('data-momtv-zoom', '135');
+      }
+    } catch (_) {}
   }
   apply10FootScaling();
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', apply10FootScaling);
+  if (typeof document !== 'undefined' && document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply10FootScaling, { once: true });
   }
 
   function formatTime(seconds) {
@@ -303,9 +342,11 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       } catch (_) { /* audio unsupported — non-fatal */ }
     }
 
-    ['click', 'keydown', 'touchstart'].forEach((evt) => {
-      window.addEventListener(evt, init, { once: true, passive: true });
-    });
+    if (typeof window !== 'undefined') {
+      ['click', 'keydown', 'touchstart'].forEach((evt) => {
+        window.addEventListener(evt, init, { once: true, passive: true });
+      });
+    }
 
     return { play };
   })();
@@ -319,9 +360,12 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     let activeBtnIndex = 0; // 0 = Cancel, 1 = Exit to Home
     let lastFocusedBeforeOpen = null;
 
-    function ensureElements() {
+    function ensureExitDialogElements() {
       let backdrop = document.getElementById('momtv-exit-backdrop');
       if (backdrop) return backdrop;
+
+      const target = document.body || document.documentElement;
+      if (!target) return null;
 
       backdrop = document.createElement('div');
       backdrop.id = 'momtv-exit-backdrop';
@@ -340,39 +384,47 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
             </button>
           </div>
         </div>`;
-      (document.body || document.documentElement).appendChild(backdrop);
+      target.appendChild(backdrop);
 
-      backdrop.querySelector('#momtv-btn-cancel').addEventListener('click', hide);
-      backdrop.querySelector('#momtv-btn-exit').addEventListener('click', () => {
-        playSound('select');
-        window.location.href = 'http://localhost:8765/tv';
-      });
+      const cancelBtn = backdrop.querySelector('#momtv-btn-cancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', hideExitDialog);
+      const exitBtn = backdrop.querySelector('#momtv-btn-exit');
+      if (exitBtn) {
+        exitBtn.addEventListener('click', () => {
+          playSound('select');
+          window.location.href = 'http://localhost:8765/tv';
+        });
+      }
 
       return backdrop;
     }
 
-    function updateFocusVisual() {
-      const backdrop = ensureElements();
+    function updateExitDialogFocus() {
+      const backdrop = ensureExitDialogElements();
+      if (!backdrop) return;
       const cancelBtn = backdrop.querySelector('#momtv-btn-cancel');
       const exitBtn = backdrop.querySelector('#momtv-btn-exit');
+      if (!cancelBtn || !exitBtn) return;
       const cancelActive = activeBtnIndex === 0;
       cancelBtn.classList.toggle('active-focus', cancelActive);
       exitBtn.classList.toggle('active-focus', !cancelActive);
-      (cancelActive ? cancelBtn : exitBtn).focus({ preventScroll: true });
+      const toFocus = cancelActive ? cancelBtn : exitBtn;
+      if (toFocus && toFocus.focus) toFocus.focus({ preventScroll: true });
     }
 
-    function show() {
+    function showExitDialog() {
       if (isInternalMomTVPage()) return; // never show the exit prompt on the launcher itself
-      const backdrop = ensureElements();
+      const backdrop = ensureExitDialogElements();
+      if (!backdrop) return;
       lastFocusedBeforeOpen = SpatialNav.getFocused();
       isOpen = true;
       activeBtnIndex = 0; // default to the safe option
       backdrop.classList.add('visible');
-      updateFocusVisual();
+      updateExitDialogFocus();
       playSound('dialog');
     }
 
-    function hide() {
+    function hideExitDialog() {
       const backdrop = document.getElementById('momtv-exit-backdrop');
       if (backdrop) backdrop.classList.remove('visible');
       isOpen = false;
@@ -382,29 +434,33 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
     }
 
-    function handleKey(key) {
+    function handleExitDialogKey(key) {
       const k = key.toLowerCase();
 
-      if (['left', 'arrowleft'].includes(k)) { activeBtnIndex = 0; updateFocusVisual(); playSound('focus'); return true; }
-      if (['right', 'arrowright'].includes(k)) { activeBtnIndex = 1; updateFocusVisual(); playSound('focus'); return true; }
+      if (['left', 'arrowleft'].includes(k)) { activeBtnIndex = 0; updateExitDialogFocus(); playSound('focus'); return true; }
+      if (['right', 'arrowright'].includes(k)) { activeBtnIndex = 1; updateExitDialogFocus(); playSound('focus'); return true; }
 
       if (['enter', 'ok', 'select', 'space'].includes(k)) {
         if (activeBtnIndex === 1) {
           playSound('select');
           window.location.href = 'http://localhost:8765/tv';
         } else {
-          hide();
+          hideExitDialog();
         }
         return true;
       }
 
-      if (['back', 'escape'].includes(k)) { hide(); return true; }
+      if (['back', 'escape'].includes(k)) { hideExitDialog(); return true; }
       return true; // swallow up/down so focus stays inside the dialog
     }
 
     return {
       get isOpen() { return isOpen; },
-      show, hide, handleKey
+      show: showExitDialog,
+      hide: hideExitDialog,
+      handleKey: handleExitDialogKey,
+      ensureElements: ensureExitDialogElements,
+      updateFocusVisual: updateExitDialogFocus
     };
   })();
 
@@ -417,41 +473,54 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     function ensureElements() {
       let pill = document.getElementById('momtv-hud-pill');
       if (pill) return pill;
+      const target = document.body || document.documentElement;
+      if (!target) return null;
       pill = document.createElement('div');
       pill.id = 'momtv-hud-pill';
       pill.className = 'momtv-internal';
       pill.innerHTML = `
         <div class="momtv-osd-header"><span id="momtv-osd-action"></span><span id="momtv-osd-time" class="momtv-osd-time"></span></div>
         <div id="momtv-osd-track" class="momtv-osd-track"><div id="momtv-osd-fill" class="momtv-osd-fill"></div></div>`;
-      (document.body || document.documentElement).appendChild(pill);
+      target.appendChild(pill);
       return pill;
     }
 
     /** @param {string} text @param {string} [iconName] one of ICONS' keys */
     function show(text, iconName) {
       const pill = ensureElements();
-      document.getElementById('momtv-osd-action').innerHTML = (iconName ? iconSpan(iconName) : '') + `<span>${text}</span>`;
-      document.getElementById('momtv-osd-time').textContent = '';
-      document.getElementById('momtv-osd-track').classList.remove('active');
+      if (!pill) return;
+      const actionEl = document.getElementById('momtv-osd-action');
+      const timeEl = document.getElementById('momtv-osd-time');
+      const trackEl = document.getElementById('momtv-osd-track');
+
+      if (actionEl) actionEl.innerHTML = (iconName ? iconSpan(iconName) : '') + `<span>${text}</span>`;
+      if (timeEl) timeEl.textContent = '';
+      if (trackEl) trackEl.classList.remove('active');
 
       pill.classList.add('visible');
       clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => pill.classList.remove('visible'), 1500);
+      hideTimer = setTimeout(() => pill && pill.classList.remove('visible'), 1500);
     }
 
     function showVideoProgress(video, actionText, iconName) {
       if (!video) return;
       const pill = ensureElements();
+      if (!pill) return;
       const pct = Math.min(100, Math.max(0, (video.currentTime / (video.duration || 1)) * 100));
 
-      document.getElementById('momtv-osd-action').innerHTML = (iconName ? iconSpan(iconName) : '') + `<span>${actionText}</span>`;
-      document.getElementById('momtv-osd-time').textContent = `[${formatTime(video.currentTime)} / ${formatTime(video.duration)}]`;
-      document.getElementById('momtv-osd-fill').style.width = `${pct}%`;
-      document.getElementById('momtv-osd-track').classList.add('active');
+      const actionEl = document.getElementById('momtv-osd-action');
+      const timeEl = document.getElementById('momtv-osd-time');
+      const fillEl = document.getElementById('momtv-osd-fill');
+      const trackEl = document.getElementById('momtv-osd-track');
+
+      if (actionEl) actionEl.innerHTML = (iconName ? iconSpan(iconName) : '') + `<span>${actionText}</span>`;
+      if (timeEl) timeEl.textContent = `[${formatTime(video.currentTime)} / ${formatTime(video.duration)}]`;
+      if (fillEl) fillEl.style.width = `${pct}%`;
+      if (trackEl) trackEl.classList.add('active');
 
       pill.classList.add('visible');
       clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => pill.classList.remove('visible'), 1800);
+      hideTimer = setTimeout(() => pill && pill.classList.remove('visible'), 1800);
     }
 
     return { show, showVideoProgress };
@@ -460,23 +529,27 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   const NowPlaying = {
     _timer: null,
     show(text) {
-      let el = document.getElementById('momtv-now-playing');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'momtv-now-playing';
-        el.style.cssText = 'position:fixed;top:16px;right:16px;padding:8px 16px;background:rgba(0,0,0,0.75);color:#fff;border-radius:8px;font:14px/1.4 system-ui;z-index:999999;transition:opacity 0.5s;pointer-events:none;';
-        document.body.appendChild(el);
-      }
-      el.textContent = text;
-      el.style.opacity = '1';
-      clearTimeout(this._timer);
-      this._timer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
+      try {
+        let el = document.getElementById('momtv-now-playing');
+        if (!el) {
+          const target = document.body || document.documentElement;
+          if (!target) return;
+          el = document.createElement('div');
+          el.id = 'momtv-now-playing';
+          el.style.cssText = 'position:fixed;top:16px;right:16px;padding:8px 16px;background:rgba(0,0,0,0.75);color:#fff;border-radius:8px;font:14px/1.4 system-ui;z-index:999999;transition:opacity 0.5s;pointer-events:none;';
+          target.appendChild(el);
+        }
+        el.textContent = text;
+        el.style.opacity = '1';
+        clearTimeout(this._timer);
+        this._timer = setTimeout(() => { if (el) el.style.opacity = '0'; }, 3000);
+      } catch (_) {}
     }
   };
 
-  if (document.readyState === 'complete') {
+  if (typeof document !== 'undefined' && document.readyState === 'complete') {
     setTimeout(() => NowPlaying.show('MOM TV Loading...'), 500);
-  } else {
+  } else if (typeof window !== 'undefined') {
     window.addEventListener('load', () => setTimeout(() => NowPlaying.show('MOM TV Started'), 500), { once: true });
   }
 
@@ -498,6 +571,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       let bar = document.getElementById('momtv-player-action-bar');
       if (bar) return bar;
 
+      const target = document.body || document.documentElement;
+      if (!target) return null;
+
       bar = document.createElement('div');
       bar.id = 'momtv-player-action-bar';
       bar.className = 'momtv-internal';
@@ -506,28 +582,36 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
         <div class="momtv-bar-buttons">
           ${ACTIONS.map(a => `<button class="momtv-action-btn" data-action="${a.action}">${iconSpan(a.icon)}<span class="btn-label">${a.label}</span></button>`).join('')}
         </div>`;
-      (document.body || document.documentElement).appendChild(bar);
+      target.appendChild(bar);
 
-      bar.querySelectorAll('.momtv-action-btn').forEach((btn, idx) => {
-        btn.addEventListener('click', () => {
-          activeIndex = idx;
-          updateFocusVisual();
-          execute(btn.getAttribute('data-action'));
+      const btns = bar.querySelectorAll('.momtv-action-btn');
+      if (btns) {
+        btns.forEach((btn, idx) => {
+          btn.addEventListener('click', () => {
+            activeIndex = idx;
+            updateFocusVisual();
+            execute(btn.getAttribute('data-action'));
+          });
         });
-      });
+      }
       return bar;
     }
 
     function updateFocusVisual() {
       const bar = ensureElements();
-      bar.querySelectorAll('.momtv-action-btn').forEach((btn, idx) => btn.classList.toggle('active-focus', idx === activeIndex));
+      if (!bar) return;
+      const btns = bar.querySelectorAll('.momtv-action-btn');
+      if (btns) {
+        btns.forEach((btn, idx) => btn.classList.toggle('active-focus', idx === activeIndex));
+      }
     }
 
     function show() {
-      ensureElements();
+      const bar = ensureElements();
+      if (!bar) return;
       isVisible = true;
       updateFocusVisual();
-      document.getElementById('momtv-player-action-bar').classList.add('visible');
+      bar.classList.add('visible');
       playSound('focus');
       resetAutoHide();
     }
@@ -577,7 +661,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
           break;
         }
         case 'subtitles':
-          if (video.textTracks.length > 0) {
+          if (video.textTracks && video.textTracks.length > 0) {
             const track = video.textTracks[0];
             track.mode = track.mode === 'showing' ? 'disabled' : 'showing';
             HUD.show(track.mode === 'showing' ? 'Subtitles ON' : 'Subtitles OFF', 'tv');
@@ -660,7 +744,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
         }
         return videos[0] || null;
       }
-      
+
       _cachedVideo = findVideo();
       _cachedVideoTime = now;
       return _cachedVideo;
@@ -733,19 +817,12 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     return { getActiveVideo, isVideoModeActive, handleKey, markEngaged, markDisengaged };
   })();
 
-  /**
-   * Streaming platforms mostly need the same four behaviors (play/pause,
-   * rewind, forward, back) — the previous version copy-pasted a near-
-   * identical adapter per platform. This factory takes just the
-   * platform-specific bits (host match + button selectors) and produces the
-   * same adapter shape, cutting ~200 lines of duplication down to data.
-   */
   const NETFLIX_PLAYER_SELECTOR = '.watch-video, .nf-player-container, [data-uia="video-canvas"]';
 
   function createPlatformAdapter(config) {
     const { name, matchesHost, isPlayerRoute, selectors, dispatchStrategy = 'click' } = config;
 
-    function query(sel) { return sel ? document.querySelector(sel) : null; }
+    function query(sel) { return sel && typeof document !== 'undefined' && document.querySelector ? document.querySelector(sel) : null; }
 
     function isActive(video) {
       if (!matchesHost()) return false;
@@ -754,12 +831,22 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
     function dispatchKey(keyStr, codeStr, keyCodeNum) {
       if (dispatchStrategy === 'keyboard') {
-        const target = query(selectors.playerArea || 'video') || document.body;
+        const target = query(selectors.playerArea || 'video') || (typeof document !== 'undefined' && (document.body || document.documentElement)) || null;
         const opts = { key: keyStr, code: codeStr, keyCode: keyCodeNum, which: keyCodeNum, bubbles: true, cancelable: true };
-        [new KeyboardEvent('keydown', opts), new KeyboardEvent('keyup', opts)].forEach(evt => {
-          target.dispatchEvent(evt);
-          document.dispatchEvent(evt);
-        });
+        const down = new KeyboardEvent('keydown', opts);
+        const up = new KeyboardEvent('keyup', opts);
+
+        if (target && typeof target.dispatchEvent === 'function') {
+          target.dispatchEvent(down);
+          target.dispatchEvent(up);
+        }
+        if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
+          document.dispatchEvent(down);
+          document.dispatchEvent(up);
+        } else if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+          window.dispatchEvent(down);
+          window.dispatchEvent(up);
+        }
       }
     }
 
@@ -817,13 +904,13 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     return { name, matchesHost, isActive, handleKey, handleBack };
   }
 
-  const host = () => window.location.hostname;
-  const path = () => window.location.pathname;
+  const host = () => (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
+  const path = () => (typeof window !== 'undefined' && window.location && window.location.pathname) || '';
 
   const NetflixAdapter = createPlatformAdapter({
     name: 'netflix',
     matchesHost: () => host().includes('netflix.com'),
-    isPlayerRoute: () => path().includes('/watch') || Boolean(document.querySelector(NETFLIX_PLAYER_SELECTOR)),
+    isPlayerRoute: () => path().includes('/watch') || Boolean(typeof document !== 'undefined' && document.querySelector && document.querySelector(NETFLIX_PLAYER_SELECTOR)),
     dispatchStrategy: 'keyboard',
     selectors: {
       playerArea: NETFLIX_PLAYER_SELECTOR + ', video',
@@ -832,8 +919,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   });
 
   const HotstarAdapter = createPlatformAdapter({
+    name: 'hotstar',
     matchesHost: () => host().includes('hotstar.com'),
-    isPlayerRoute: () => path().includes('/watch') || path().includes('/play') || Boolean(document.querySelector('.player-container, .shaka-video-container')),
+    isPlayerRoute: () => path().includes('/watch') || path().includes('/play') || Boolean(typeof document !== 'undefined' && document.querySelector && document.querySelector('.player-container, .shaka-video-container')),
     selectors: {
       playPause: 'button[aria-label*="Play" i], button[aria-label*="Pause" i], .play-btn, [data-testid*="play-pause-btn" i], .shaka-play-button',
       rewind: 'button[aria-label*="Rewind" i], button[aria-label*="backward" i], [data-testid*="rewind" i], .rewind-btn',
@@ -843,8 +931,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   });
 
   const PrimeAdapter = createPlatformAdapter({
+    name: 'prime',
     matchesHost: () => host().includes('primevideo.com') || (host().includes('amazon.') && path().includes('/video/')),
-    isPlayerRoute: () => path().includes('/watch') || Boolean(document.querySelector('.atvwebplayersdk-player-container')),
+    isPlayerRoute: () => path().includes('/watch') || Boolean(typeof document !== 'undefined' && document.querySelector && document.querySelector('.atvwebplayersdk-player-container')),
     selectors: {
       playPause: '.atvwebplayersdk-playpause-button, button[aria-label*="Play" i], button[aria-label*="Pause" i]',
       rewind: '.atvwebplayersdk-rewind-button, button[aria-label*="10 seconds backward" i], .rewind-button',
@@ -854,8 +943,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
   });
 
   const JioCinemaAdapter = createPlatformAdapter({
+    name: 'jiocinema',
     matchesHost: () => host().includes('jiocinema.com'),
-    isPlayerRoute: () => path().includes('/watch') || Boolean(document.querySelector('.player-wrapper, .player-container')),
+    isPlayerRoute: () => path().includes('/watch') || Boolean(typeof document !== 'undefined' && document.querySelector && document.querySelector('.player-wrapper, .player-container')),
     selectors: {
       playPause: 'button[class*="play" i], button[class*="pause" i], button[aria-label*="Play" i], [data-testid*="play-pause" i]',
       rewind: 'button[aria-label*="Rewind" i], button[class*="rewind" i], [data-testid*="rewind" i]',
@@ -866,6 +956,22 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
   const PlatformAdapters = {
     all: [NetflixAdapter, HotstarAdapter, PrimeAdapter, JioCinemaAdapter],
+
+    isNetflix: () => NetflixAdapter.matchesHost(),
+    isNetflixPlayerActive: (video) => NetflixAdapter.isActive(video),
+    handleNetflixKey: (key, video) => NetflixAdapter.handleKey(key, video),
+
+    isHotstar: () => HotstarAdapter.matchesHost(),
+    isHotstarPlayerActive: (video) => HotstarAdapter.isActive(video),
+    handleHotstarKey: (key, video) => HotstarAdapter.handleKey(key, video),
+
+    isPrime: () => PrimeAdapter.matchesHost(),
+    isPrimePlayerActive: (video) => PrimeAdapter.isActive(video),
+    handlePrimeKey: (key, video) => PrimeAdapter.handleKey(key, video),
+
+    isJioCinema: () => JioCinemaAdapter.matchesHost(),
+    isJioCinemaPlayerActive: (video) => JioCinemaAdapter.isActive(video),
+    handleJioCinemaKey: (key, video) => JioCinemaAdapter.handleKey(key, video),
 
     dispatch(key, video) {
       for (const adapter of this.all) {
@@ -998,8 +1104,6 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     const CACHE_TTL_MS = 600;
     const HEADER_CACHE_TTL_MS = 1000;
 
-    // DOM mutations fire very frequently on infinite-scroll pages; invalidating
-    // the cache on every single one thrashes re-scans, so this is debounced.
     let invalidateTimer = null;
     function invalidate() {
       clearTimeout(invalidateTimer);
@@ -1011,8 +1115,19 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
     if (typeof MutationObserver !== 'undefined') {
       const observer = new MutationObserver(invalidate);
-      const attach = () => document.body && observer.observe(document.body, { childList: true, subtree: true, characterData: false, attributes: false });
-      document.body ? attach() : document.addEventListener('DOMContentLoaded', attach);
+      const attach = () => {
+        const root = document.body || document.documentElement;
+        if (root && root.nodeType) {
+          try {
+            observer.observe(root, { childList: true, subtree: true, characterData: false, attributes: false });
+          } catch (_) {}
+        }
+      };
+      if (document.body || document.documentElement) {
+        attach();
+      } else {
+        document.addEventListener('DOMContentLoaded', attach, { once: true });
+      }
     }
 
     function isVisible(el) {
@@ -1081,7 +1196,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       const candidates = [];
       for (const el of document.querySelectorAll(CARD_SELECTORS)) {
         if (isJunkElement(el) || isInHeaderNav(el) || !isVisible(el)) continue;
-        const rect = el.getBoundingClientRect();
+        const rect = el._momTvRect || el.getBoundingClientRect();
         const isCardGeom = rect.width >= 75 && rect.height >= 40;
         const isBtnGeom = isPrimaryActionButton(el) && rect.width >= 40 && rect.height >= 20;
         const tag = (el.tagName || '').toUpperCase();
@@ -1091,8 +1206,6 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
         candidates.push(el);
       }
 
-      // Dedupe nested candidates: keep the outer visual card, but bind its click
-      // target to the real inner action element (link/button).
       const unique = [];
       for (let i = 0; i < candidates.length; i++) {
         const c1 = candidates[i];
@@ -1102,7 +1215,7 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
           const c2 = candidates[j];
           if (c2.contains(c1)) {
             const r2 = c2._momTvRect, r1 = c1._momTvRect;
-            if (r2.width > r1.width * 1.8) continue; // c2 is a whole row/tray, not a wrapper — c1 is the real card
+            if (r2.width > r1.width * 1.8) continue;
             c2._momTvActionTarget = findActionTarget(c1) || c1;
             dominated = true;
             break;
@@ -1329,8 +1442,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
       }
     }
 
-    if (document.readyState === 'complete') setTimeout(autoFocusFirst, 350);
-    else window.addEventListener('load', () => setTimeout(autoFocusFirst, 350), { once: true });
+    if (typeof document !== 'undefined' && document.readyState === 'complete') setTimeout(autoFocusFirst, 350);
+    else if (typeof window !== 'undefined') window.addEventListener('load', () => setTimeout(autoFocusFirst, 350), { once: true });
 
     function moveFocus(direction) {
       if (!currentFocused || !isElementInDoc(currentFocused)) {
@@ -1480,8 +1593,8 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
      12. VIRTUAL MOUSE CURSOR (Magic Trackpad mode)
      ========================================================================== */
   const VirtualCursor = (() => {
-    let x = Math.round(window.innerWidth / 2) || 960;
-    let y = Math.round(window.innerHeight / 2) || 540;
+    let x = (typeof window !== 'undefined' && Math.round(window.innerWidth / 2)) || 960;
+    let y = (typeof window !== 'undefined' && Math.round(window.innerHeight / 2)) || 540;
     let visible = false;
     let hideTimer = null;
     let el = null;
@@ -1489,21 +1602,41 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
     function ensureElement() {
       el = document.getElementById('momtv-virtual-cursor');
       if (el) return el;
+      const target = document.body || document.documentElement;
+      if (!target) return null;
       el = document.createElement('div');
       el.id = 'momtv-virtual-cursor';
       el.className = 'momtv-internal';
       el.innerHTML = `<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M4 3L11.5 24L15.5 15.5L24 11.5L4 3Z" fill="#00f0ff" stroke="#FFFFFF" stroke-width="1.6" stroke-linejoin="round"/>
         <circle cx="15.5" cy="15.5" r="2.5" fill="#FFFFFF"/></svg>`;
-      (document.body || document.documentElement).appendChild(el);
+      target.appendChild(el);
       return el;
     }
 
-    function render() { ensureElement().style.transform = `translate(${x - 4}px, ${y - 3}px)`; }
+    function render() {
+      const e = ensureElement();
+      if (e) e.style.transform = `translate(${x - 4}px, ${y - 3}px)`;
+    }
 
-    function show() { ensureElement().classList.add('visible'); visible = true; resetAutoHide(); }
-    function hide() { if (el) el.classList.remove('visible'); visible = false; clearTimeout(hideTimer); hideTimer = null; }
-    function resetAutoHide() { clearTimeout(hideTimer); hideTimer = setTimeout(hide, 4000); }
+    function show() {
+      const e = ensureElement();
+      if (e) e.classList.add('visible');
+      visible = true;
+      resetAutoHide();
+    }
+
+    function hide() {
+      if (el) el.classList.remove('visible');
+      visible = false;
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+
+    function resetAutoHide() {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(hide, 4000);
+    }
 
     function set(nx, ny) {
       x = Math.max(0, Math.min(window.innerWidth - 1, Math.round(nx)));
@@ -1528,8 +1661,11 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
     function click() {
       show();
-      ensureElement().classList.add('clicking');
-      setTimeout(() => el && el.classList.remove('clicking'), 160);
+      const e = ensureElement();
+      if (e) {
+        e.classList.add('clicking');
+        setTimeout(() => el && el.classList.remove('clicking'), 160);
+      }
       playSound('select');
 
       try {
@@ -1668,6 +1804,9 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
         return true;
       }
 
+      const target = document.head || document.documentElement;
+      if (!target) return false;
+
       const script = document.createElement('script');
       script.src = '/static/eruda.min.js';
       script.onload = () => {
@@ -1691,9 +1830,10 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
             }
           } catch (_) {}
         };
-        (document.head || document.documentElement).appendChild(cdnScript);
+        const cdnTarget = document.head || document.documentElement;
+        if (cdnTarget) cdnTarget.appendChild(cdnScript);
       };
-      (document.head || document.documentElement).appendChild(script);
+      target.appendChild(script);
       return true;
     } catch (_) {
       return false;
@@ -1712,32 +1852,34 @@ html.momtv-10ft-scaled, html[data-momtv-zoom="135"] { zoom: 1.35 !important; }
 
   let lastKeydownAt = 0;
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes((e.key || '').toUpperCase()))) {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleDevTools();
-      return;
-    }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes((e.key || '').toUpperCase()))) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleDevTools();
+        return;
+      }
 
-    const mapped = KEY_MAP[e.key];
-    if (!mapped) return;
+      const mapped = KEY_MAP[e.key];
+      if (!mapped) return;
 
-    if (isInternalMomTVPage() || document.querySelector('.tv-shell')) {
-      if (mapped === 'back' && window.MomTV.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
-      return;
-    }
+      if (isInternalMomTVPage() || document.querySelector('.tv-shell')) {
+        if (mapped === 'back' && window.MomTV.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
+        return;
+      }
 
-    const now = Date.now();
-    if (now - lastKeydownAt < ENGINE_DEBOUNCE_MS) { e.preventDefault(); e.stopPropagation(); return; }
+      const now = Date.now();
+      if (now - lastKeydownAt < ENGINE_DEBOUNCE_MS) { e.preventDefault(); e.stopPropagation(); return; }
 
-    const active = document.activeElement;
-    const isTyping = active && (['INPUT', 'TEXTAREA'].includes(active.tagName) || active.isContentEditable);
-    if (isTyping && ['ArrowLeft', 'ArrowRight'].includes(e.key) && !active.classList.contains('momtv-focused-input')) return;
+      const active = document.activeElement;
+      const isTyping = active && (['INPUT', 'TEXTAREA'].includes(active.tagName) || active.isContentEditable);
+      if (isTyping && ['ArrowLeft', 'ArrowRight'].includes(e.key) && !active.classList.contains('momtv-focused-input')) return;
 
-    lastKeydownAt = now;
-    if (window.MomTV.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
-  }, true);
+      lastKeydownAt = now;
+      if (window.MomTV.handleKey(mapped)) { e.preventDefault(); e.stopPropagation(); }
+    }, true);
+  }
 
   console.log('✅ [MOM TV Companion 2.0] TV engine ready. window.MomTV is live.');
 })();
