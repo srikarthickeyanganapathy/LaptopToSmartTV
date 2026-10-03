@@ -54,20 +54,35 @@ class CDPControllerBridge:
         self.ws = None
         self._msg_id = 0
         self._pending_futures: dict[int, asyncio.Future] = {}
-        self._connected = asyncio.Event()
+        # FIX: asyncio.Event/Lock are created lazily inside the running loop.
+        # Creating them at import time (old code) binds them to whatever loop
+        # exists at import — on Python < 3.10 (or when app.py builds its own
+        # loop) that produced "Future attached to a different loop" crashes.
+        self._connected: asyncio.Event | None = None
+        self._lock: asyncio.Lock | None = None
         self._running = False
-        self._lock = asyncio.Lock()
         self._active_target = None
         self._script_identifier: str | None = None
+        # FIX: UA-override state tracker (see _sync_ua_for_frame).
+        self._applied_ua: str | None = None
+        # FIX: reference to the main loop so worker threads can schedule calls safely.
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def _ensure_primitives(self):
+        if self._connected is None:
+            self._connected = asyncio.Event()
+        if self._lock is None:
+            self._lock = asyncio.Lock()
 
     @property
     def is_connected(self) -> bool:
-        return self._connected.is_set() and self.ws is not None
+        return self._connected is not None and self._connected.is_set() and self.ws is not None
 
     async def wait_connected(self, timeout: float = 6.0) -> bool:
         """Wait asynchronously until CDP WebSocket connection is established."""
         if self.is_connected:
             return True
+        self._ensure_primitives()
         try:
             await asyncio.wait_for(self._connected.wait(), timeout=timeout)
             return True
@@ -117,8 +132,10 @@ class CDPControllerBridge:
     async def run(self):
         """Maintain persistent CDP connection to Brave with automatic reconnection."""
         self._running = True
+        self._loop = asyncio.get_running_loop()  # FIX: capture for thread-safe scheduling
+        self._ensure_primitives()
         print(f"🔄 [CDP Bridge] Worker started. Monitoring port {self.cdp_port}...")
-        
+
         attempt = 0
 
         while self._running:
@@ -149,6 +166,12 @@ class CDPControllerBridge:
                     # Automatically inject tv-engine.js
                     await self._inject_tv_engine()
 
+                    # FIX: sync the UA override for the page that is ALREADY loaded
+                    # (fresh session → prev is None → applies without reloading).
+                    current_url = target.get("url") or ""
+                    if current_url.startswith(("http://", "https://")):
+                        asyncio.create_task(self._sync_ua_for_frame(current_url))
+
                     # Message reader pump
                     async for raw_message in ws:
                         try:
@@ -172,10 +195,11 @@ class CDPControllerBridge:
                             elif method == "Page.frameNavigated":
                                 frame = msg.get("params", {}).get("frame", {})
                                 if not frame.get("parentId"):
-                                    f_url = frame.get("url")
-                                    if f_url and not f_url.startswith("about:"):
-                                        ua, plat, meta = self._pick_ua_for_url(f_url)
-                                        asyncio.create_task(self.send("Emulation.setUserAgentOverride", {"userAgent": ua, "platform": plat, "userAgentMetadata": meta}))
+                                    f_url = frame.get("url") or ""
+                                    # FIX: only real http(s) frames — about:/chrome-error:
+                                    # frames previously triggered pointless UA churn.
+                                    if f_url.startswith(("http://", "https://")):
+                                        asyncio.create_task(self._sync_ua_for_frame(f_url))
 
             except (websockets.exceptions.ConnectionClosed, ConnectionRefusedError, OSError):
                 pass
@@ -190,11 +214,42 @@ class CDPControllerBridge:
                     attempt += 1
                     await asyncio.sleep(backoff)
 
+    async def _sync_ua_for_frame(self, url: str):
+        """
+        FIX: Emulation.setUserAgentOverride only affects FUTURE requests. The old
+        code applied it from Page.frameNavigated — i.e. AFTER the navigation had
+        already committed with the previous UA — so clicking a YouTube TV card in
+        the launcher loaded the DESKTOP YouTube site. We now track the applied UA
+        and, when the profile class changes mid-browsing, apply the override and
+        reload once so the destination renders with the correct profile.
+        (navigate() always sets the UA before Page.navigate, so its frames match
+        and never trigger the reload.)
+        """
+        try:
+            ua, plat, meta = self._pick_ua_for_url(url)
+            if ua == self._applied_ua:
+                return
+            await self.send(
+                "Emulation.setUserAgentOverride",
+                {"userAgent": ua, "platform": plat, "userAgentMetadata": meta},
+            )
+            prev = self._applied_ua
+            self._applied_ua = ua
+            # Only reload when switching between two KNOWN profiles (never on the
+            # first sync after connecting — that would reload the launcher on
+            # every reconnect).
+            if prev is not None and prev != ua:
+                await self.send("Page.reload", {"ignoreCache": False})
+        except Exception:
+            pass
+
     def _cleanup_connection(self):
         """Clean up state on disconnect."""
-        self._connected.clear()
+        if self._connected is not None:
+            self._connected.clear()
         self.ws = None
         self._script_identifier = None
+        self._applied_ua = None  # a fresh DevTools session starts from the target's default UA
         for fut in list(self._pending_futures.values()):
             if not fut.done():
                 fut.cancel()
@@ -205,6 +260,7 @@ class CDPControllerBridge:
         if not self.is_connected or not self.ws:
             return None
 
+        self._ensure_primitives()
         async with self._lock:
             self._msg_id += 1
             msg_id = self._msg_id
@@ -310,11 +366,18 @@ class CDPControllerBridge:
                 except Exception:
                     pass
 
-        # 5. If we closed the tab our WebSocket was attached to, update active target and cycle connection
+        # 5. If we closed the tab our WebSocket was attached to, update active target and cycle connection.
+        # FIX: this method runs inside a WORKER THREAD (asyncio.to_thread). The old
+        # asyncio.create_task(self.ws.close()) raised RuntimeError("no running event
+        # loop") here, which propagated up through navigate() and aborted the whole
+        # launch request (the remote never got a reply). Schedule on the main loop.
         if self._active_target and primary_id != self._active_target.get("id"):
             self._active_target = primary
-            if self.ws:
-                asyncio.create_task(self.ws.close())
+            if self.ws and self._loop and self._loop.is_running():
+                try:
+                    asyncio.run_coroutine_threadsafe(self.ws.close(), self._loop)
+                except Exception:
+                    pass
 
         if closed > 0:
             print(f"🧹 [CDP Bridge] Closed {closed} secondary tab(s). Kept active tab: {primary.get('title', 'Primary')}")
@@ -331,15 +394,19 @@ class CDPControllerBridge:
         """Single-Window In-Place Navigation: Navigate existing kiosk tab without spawning new windows."""
         if not self.is_connected:
             await self.wait_connected(timeout=4.0)
+        if not self.is_connected:
+            # FIX: fail fast instead of firing no-op commands into a dead socket.
+            return False
         print(f"🧭 [CDP Bridge] Navigating in-place to: {url}")
-        
+
         ua, plat, meta = self._pick_ua_for_url(url)
         await self.send("Emulation.setUserAgentOverride", {"userAgent": ua, "platform": plat, "userAgentMetadata": meta})
+        self._applied_ua = ua  # FIX: record it so frameNavigated won't reload this navigation
         if ua == SMART_TV_UA:
             print(f"📺 [CDP Bridge] Applied Smart TV User-Agent override for YouTube TV")
         else:
             print(f"💻 [CDP Bridge] Applied Desktop User-Agent for custom web application")
-            
+
         await self.send("Page.bringToFront")
         res = await self.send("Page.navigate", {"url": url})
         target_id = self._active_target.get("id") if self._active_target else None
@@ -368,23 +435,26 @@ class CDPControllerBridge:
         """Navigate back via custom tv-engine handler or browser history."""
         expr = "(window.MomTV && typeof window.MomTV.goBack === 'function') ? window.MomTV.goBack() : (window.history.length > 1 ? (window.history.back(), true) : false)"
         res = await self.evaluate(expr)
-        if not res:
-            # Fallback browser back key dispatch via CDP
-            await self.send("Input.dispatchKeyEvent", {
-                "type": "rawKeyDown",
-                "key": "BrowserBack",
-                "code": "BrowserBack",
-                "windowsVirtualKeyCode": 166,
-                "nativeVirtualKeyCode": 166,
-            }, wait_response=False)
-            await self.send("Input.dispatchKeyEvent", {
-                "type": "keyUp",
-                "key": "BrowserBack",
-                "code": "BrowserBack",
-                "windowsVirtualKeyCode": 166,
-                "nativeVirtualKeyCode": 166,
-            }, wait_response=False)
-        return bool(res)
+        if res:
+            return True
+        # Fallback browser back key dispatch via CDP
+        await self.send("Input.dispatchKeyEvent", {
+            "type": "rawKeyDown",
+            "key": "BrowserBack",
+            "code": "BrowserBack",
+            "windowsVirtualKeyCode": 166,
+            "nativeVirtualKeyCode": 166,
+        }, wait_response=False)
+        await self.send("Input.dispatchKeyEvent", {
+            "type": "keyUp",
+            "key": "BrowserBack",
+            "code": "BrowserBack",
+            "windowsVirtualKeyCode": 166,
+            "nativeVirtualKeyCode": 166,
+        }, wait_response=False)
+        # FIX: previously this returned the (falsy) evaluate result even after
+        # dispatching the fallback keys, so callers believed nothing happened.
+        return True
 
     async def dispatch_key(self, key_name: str) -> bool:
         """

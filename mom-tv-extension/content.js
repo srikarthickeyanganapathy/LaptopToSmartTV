@@ -292,7 +292,7 @@
       exitTo: 'https://www.netflix.com/browse'
     },
     {
-      name: 'hotstar', match: () => host().includes('hotstar.com'),
+      name: 'hotstar', match: () => host().includes('hotstar.com') || host().includes('jiohotstar.com'),
       inPlayer: () => /\/(watch|play)/.test(path()) || !!document.querySelector('.player-container, .shaka-video-container'),
       back: 'button[aria-label*="Back" i], [data-testid*="back-btn" i], .player-back-btn', skip: 'button[aria-label*="Skip" i]'
     },
@@ -348,7 +348,9 @@
       'ytd-rich-item-renderer,ytd-video-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-renderer';
     const SELECTOR = INTERACTIVE + ',' + HINTS;
     const JUNK = 'footer,[role="contentinfo"],.ad-container,.ad-banner,.advertisement,[id*="google_ads" i],[class*="google_ads" i],[aria-hidden="true"],[inert],' +
-      'ytd-channel-name,#avatar-link,#guide-button,#voice-search-button,#notification-preference-button';
+      'ytd-channel-name,#avatar-link,#guide-button,#voice-search-button,#notification-preference-button,' +
+      // Exclude carousel ROW containers — they match HINTS via class*="slider" or class*="tray" but are not individual items.
+      '[class*="slider-container" i],[class*="slider-wrapper" i],[class*="tray-container" i],[class*="carousel-container" i],[class*="carousel-wrapper" i],[class*="rail-container" i]';
     const MODAL = '[aria-modal="true"],dialog[open],[role="dialog"],[role="alertdialog"],#onetrust-banner-sdk,#onetrust-consent-sdk,#CybotCookiebotDialog,' +
       '[id*="cookie" i][id*="banner" i],[class*="cookie" i][class*="banner" i],[class*="consent" i][class*="banner" i],[class*="cookie-notice" i]';
 
@@ -392,7 +394,7 @@
     /** True when the element lives inside a horizontally scrolling row (carousel), so off-screen items are real targets. */
     function inHScroller(el) {
       for (let n = el.parentElement, d = 0; n && n !== document.body && d < 10; n = n.parentElement, d++) {
-        if (n.scrollWidth > n.clientWidth + 30 && ['auto', 'scroll', 'hidden'].includes(getComputedStyle(n).overflowX)) return true;
+        if (n.scrollWidth > n.clientWidth + 30 && ['auto', 'scroll'].includes(getComputedStyle(n).overflowX)) return true;
       }
       return false;
     }
@@ -417,7 +419,8 @@
         if (isJunk(el) || !isVisible(el)) continue;
         found.push(el);
       }
-      // Collapse nested candidates: a card wins over the link/button inside it when they're similar in size.
+      // Collapse nested candidates: a card wrapper wins over the link/button inside it.
+      // This prevents duplicate focusable elements on the same visual card.
       const set = new Set(found), out = [];
       for (const el of found) {
         const er = el.getBoundingClientRect();
@@ -425,7 +428,8 @@
         for (let p = el.parentElement, d = 0; p && d < 8; p = p.parentElement, d++) {
           if (!set.has(p)) continue;
           const pr = p.getBoundingClientRect();
-          if (pr.width <= er.width * 1.8 && pr.height <= er.height * 3) { dominated = true; break; }
+          // If the parent is similar in size, the child is redundant (parent = card, child = link inside card)
+          if (pr.width <= er.width * 1.5 && pr.height <= er.height * 2.2) { dominated = true; break; }
         }
         if (!dominated) out.push(el);
       }
@@ -631,6 +635,22 @@
 
     function reveal(el) {
       const r = el.getBoundingClientRect(), vh = innerHeight, vw = innerWidth;
+      // Check if the element is inside a horizontal scroller (carousel).
+      // If so, scroll the CAROUSEL to center the item — NOT scrollIntoView, which jumps the whole page.
+      for (let n = el.parentElement, d = 0; n && n !== document.body && d < 10; n = n.parentElement, d++) {
+        if (n.scrollWidth > n.clientWidth + 30 && ['auto', 'scroll'].includes(getComputedStyle(n).overflowX)) {
+          // Horizontal scroll only — the carousel row brings the item into view
+          const nr = n.getBoundingClientRect(), er = el.getBoundingClientRect();
+          const target = er.left - nr.left + n.scrollLeft - (nr.width - er.width) / 2;
+          n.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+          // Vertical: only scroll the page if the ROW itself is off-screen
+          if (nr.top < vh * 0.05 || nr.bottom > vh * 0.95) {
+            n.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+          return;
+        }
+      }
+      // Not in a carousel — use standard scrollIntoView but only when near the edges
       if (r.top < vh * 0.12 || r.bottom > vh * 0.88 || r.left < vw * 0.03 || r.right > vw * 0.97) {
         el.scrollIntoView({ block: r.height > vh * 0.8 ? 'start' : 'center', inline: 'center', behavior: 'smooth' });
       }
@@ -640,11 +660,16 @@
       clearTimeout(hoverTimer);
       if (hovered) { emulateHover(hovered, false); hovered = null; }
     }
-    /** Hover previews are only triggered once the user rests on an item, and never on nav bars:
-     *  firing them on every step opened dropdowns / expanded cards that then covered the next target. */
+    /** Hover previews are only triggered once the user rests on an item, and never on nav bars
+     *  or carousel items: firing them opened dropdowns / expanded cards that then covered the
+     *  next target and shifted the entire row layout (the main cause of Hotstar/Netflix glitches). */
     function scheduleHover(el) {
       clearTimeout(hoverTimer);
       if (el.closest('header,nav,[role="navigation"]') || Text.isField(el)) return;
+      // Never hover-preview inside carousels: the expansion animation shifts the row and breaks spatial nav.
+      for (let n = el.parentElement, d = 0; n && n !== document.body && d < 10; n = n.parentElement, d++) {
+        if (n.scrollWidth > n.clientWidth + 30 && ['auto', 'scroll'].includes(getComputedStyle(n).overflowX)) return;
+      }
       hoverTimer = setTimeout(() => { if (focused === el) { emulateHover(el, true); hovered = el; } }, 450);
     }
 

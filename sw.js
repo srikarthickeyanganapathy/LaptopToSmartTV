@@ -4,7 +4,7 @@
    ============================================================================== */
 
 // CACHE_NAME should be tied to app build hash for production
-const CACHE_NAME = "mom-tv-remote-v2.0.1";
+const CACHE_NAME = "mom-tv-remote-v2.1.1";
 const PRECACHE_ASSETS = [
   "/",
   "/remote",
@@ -94,7 +94,9 @@ self.addEventListener("fetch", (event) => {
           return networkResponse;
         })
         .catch(async () => {
-          const match1 = await caches.match(request);
+          // FIX: ignoreSearch — the remote is opened as /remote?token=..., and the
+          // old exact match never hit the cached copy, so offline launch failed.
+          const match1 = await caches.match(request, { ignoreSearch: true });
           if (match1) return match1;
           const match2 = await caches.match("/index.html");
           if (match2) return match2;

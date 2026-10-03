@@ -58,5 +58,5 @@ def get_qr_svg_data() -> bytes:
         img.save(buf)
         QR_SVG_CACHE = buf.getvalue()
         return QR_SVG_CACHE
-    except Exception as e:
+    except Exception:
         return b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><text x="10" y="100" fill="red">QR Unavailable</text></svg>'

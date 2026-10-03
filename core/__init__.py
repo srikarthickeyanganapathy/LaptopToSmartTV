@@ -7,4 +7,4 @@ from core.auth import compare_token, extract_token_from_headers
 from core.loop_registry import get_loop, set_loop
 from core.logging_config import setup_logging
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"

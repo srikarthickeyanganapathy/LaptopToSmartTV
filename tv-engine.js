@@ -1091,7 +1091,7 @@
 
   const HotstarAdapter = createPlatformAdapter({
     name: 'hotstar',
-    matchesHost: () => host().includes('hotstar.com'),
+    matchesHost: () => host().includes('hotstar.com') || host().includes('jiohotstar.com'),
     isPlayerRoute: () => path().includes('/watch') || path().includes('/play') || Boolean(typeof document !== 'undefined' && document.querySelector && document.querySelector('.player-container, .shaka-video-container')),
     selectors: {
       playPause: 'button[aria-label*="Play" i], button[aria-label*="Pause" i], .play-btn, [data-testid*="play-pause-btn" i], .shaka-play-button',
@@ -1530,6 +1530,12 @@
       clearTimeout(hoverTimer);
       if (engineDeactivated) return;
       if (CardDiscovery.isInHeaderNav(el) || TextEntry.isField(el)) return;
+      // Never hover-preview inside carousels: the expansion animation shifts the row and breaks spatial nav.
+      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+        try {
+          if (n.scrollWidth > n.clientWidth + 30 && ['auto', 'scroll'].includes(window.getComputedStyle(n).overflowX)) return;
+        } catch (_) {}
+      }
       hoverTimer = setTimeout(() => {
         if (!engineDeactivated && currentFocused === el) { emulateMouseHover(el); hoveredEl = el; }
       }, 450);

@@ -1,6 +1,6 @@
 """
 core/ws_controller.py — Real-Time WebSocket Automation Engine
-Responsibilities: Phone remote connection lifecycle, server-side directional key debounce (120ms), and command routing.
+Responsibilities: Phone remote connection lifecycle, server-side directional key debounce (80ms), and command routing.
 """
 
 import sys
@@ -57,13 +57,17 @@ __all__ = [
     "websocket_handler",
 ]
 
-CONNECTED_CLIENTS: set[websockets.WebSocketServerProtocol] = set()
+# FIX: `set[websockets.WebSocketServerProtocol]` crashed the import on
+# websockets >= 14 (the legacy protocol class was removed). A plain set with no
+# protocol-specific annotation is version-proof.
+CONNECTED_CLIENTS: set = set()
 
-# Server-side debounce tracking per client session (120ms debounce on directional/discrete keys)
+# Server-side debounce tracking per client session (80ms debounce on directional/discrete keys)
 # Guarantees that duplicate network packets or rapid touch repeats never trigger double moves
-CLIENT_LAST_KEY_TIME: dict[any, float] = {}
+CLIENT_LAST_KEY_TIME: dict = {}
 SERVER_DEBOUNCE_KEYS = {"up", "down", "left", "right", "ok", "enter", "back"}
 SERVER_DEBOUNCE_INTERVAL_SEC = 0.080  # 80ms responsive debounce
+MAX_UNAUTHORIZED_ATTEMPTS = 5  # FIX: cap failed auth attempts before dropping the connection
 
 
 from core.loop_registry import get_loop
@@ -103,7 +107,7 @@ async def _cmd_launch(data: dict, ws=None) -> dict:
     cmd = "launch"
     response = {"status": "ok", "cmd": cmd}
     target = data.get("url") or data.get("app") or data.get("target", "")
-    resolved = APP_SHORTCUTS.get(target.lower(), target)
+    resolved = APP_SHORTCUTS.get(str(target).lower(), target)
 
     if not kiosk_supervisor.is_running:
         kiosk_supervisor.start(initial_url=resolved)
@@ -120,7 +124,9 @@ async def _cmd_launch(data: dict, ws=None) -> dict:
         response["target"] = resolved
         response["method"] = "cdp_navigate" if success else "fallback_launch"
     elif resolved.startswith("file:///") or os.path.exists(resolved):
-        os.startfile(resolved)
+        # FIX: os.startfile only exists on Windows — guard so non-Windows test runs don't crash.
+        if hasattr(os, "startfile"):
+            os.startfile(resolved)
         park_cursor()
         response["target"] = resolved
         response["method"] = "os_startfile"
@@ -150,14 +156,18 @@ async def _cmd_get_apps(data: dict, ws=None) -> dict:
 async def _cmd_add_app(data: dict, ws=None) -> dict:
     app_dict = data.get("app") or data
     saved = save_custom_app(app_dict)
-    notify_apps_updated()
-    return {"status": "ok", "cmd": "add_app", "result": saved}
+    # FIX: only broadcast (and report success) when the save actually succeeded —
+    # previously a failed save was reported as "ok" and still pushed to all clients.
+    if saved.get("status") == "ok":
+        notify_apps_updated()
+    return {"status": saved.get("status", "error"), "cmd": "add_app", "result": saved}
 
 async def _cmd_delete_app(data: dict, ws=None) -> dict:
     app_id = data.get("id") or data.get("app_id", "")
     deleted = delete_custom_app(app_id)
-    notify_apps_updated()
-    return {"status": "ok", "cmd": "delete_app", "deleted": deleted}
+    if deleted:
+        notify_apps_updated()
+    return {"status": "ok" if deleted else "not_found", "cmd": "delete_app", "deleted": deleted}
 
 async def _cmd_key(data: dict, ws=None) -> dict:
     cmd = "key"
@@ -185,6 +195,10 @@ async def _cmd_key(data: dict, ws=None) -> dict:
         if not handled and k not in CDP_KEY_MAP:
             if k in ("reload", "refresh"):
                 await cdp_bridge.reload()
+            elif k == "home":
+                # FIX: the 'home' remote key previously fell through and did nothing
+                # when the engine didn't handle it — route it to the launcher.
+                await cdp_bridge.home()
             elif k in ("zoomin", "zoom_in"):
                 await cdp_bridge.evaluate("window.MomTV?.zoomIn?.()")
             elif k in ("zoomout", "zoom_out"):
@@ -255,12 +269,19 @@ async def _cmd_kiosk_close(data: dict, ws=None) -> dict:
     return {"status": "ok", "cmd": "kiosk_close", "message": "Brave Kiosk closed, returned to Windows desktop"}
 
 async def _cmd_search(data: dict, ws=None) -> dict:
-    query = str(data.get("query", "")).strip()
+    # FIX: accept the fields the PWA share-target / richer clients send
+    # (query/q/text/title/url) — previously only "query" was read.
+    query = str(
+        data.get("query") or data.get("q") or data.get("text") or data.get("title") or ""
+    ).strip()
+    shared_url = str(data.get("url") or "").strip()
+    if not query and shared_url:
+        query = shared_url  # a bare link was shared
     destination = str(data.get("destination", "youtube")).lower()
     encoded = urllib.parse.quote_plus(query)
 
-    if destination in ("hotstar", "disney"):
-        target_url = f"https://www.hotstar.com/in/explore?search_query={encoded}"
+    if destination in ("hotstar", "disney", "jiohotstar"):
+        target_url = f"https://www.jiohotstar.com/in/explore?search_query={encoded}"
     elif destination in ("web", "google"):
         target_url = f"https://www.google.com/search?q={encoded}"
     else:
@@ -301,7 +322,10 @@ async def _cmd_mouse_move(data: dict, ws=None) -> dict:
                 "expression": f"window.MomTV?.moveCursor?.({dx}, {dy})",
                 "returnByValue": False
             }, wait_response=False)
-        user32.mouse_event(MOUSEEVENTF_MOVE, int(dx), int(dy), 0, 0)
+        else:
+            # FIX: only drive the real OS cursor when CDP is unavailable. Firing BOTH
+            # (page virtual cursor + hidden OS cursor) moved/clicked twice per event.
+            user32.mouse_event(MOUSEEVENTF_MOVE, int(dx), int(dy), 0, 0)
         response["dx"] = dx
         response["dy"] = dy
     except Exception as e:
@@ -317,12 +341,14 @@ async def _cmd_mouse_click(data: dict, ws=None) -> dict:
                 "expression": "window.MomTV?.clickCursor?.()",
                 "returnByValue": False
             }, wait_response=False)
-        if button == "right":
-            user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-            user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
         else:
-            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            # FIX: same as mouse_move — real OS clicks only when CDP is down.
+            if button == "right":
+                user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            else:
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
         response["button"] = button
     except Exception as e:
         response["error"] = str(e)
@@ -333,13 +359,16 @@ async def _cmd_mouse_scroll(data: dict, ws=None) -> dict:
     try:
         dy = float(data.get("dy", 0))
         if cdp_bridge.is_connected:
-            # Use MomTV.scrollBy — scrolls the element under the virtual cursor,
-            # not just the window. Correctly handles nested scroll containers.
+            # FIX: MomTV.scrollBy() returns undefined, so the old
+            # `MomTV?.scrollBy?.(dy) ?? window.scrollBy(0, dy)` ALSO executed
+            # window.scrollBy — every remote scroll jumped the page twice.
+            # Branch on existence instead of the return value.
             await cdp_bridge.send("Runtime.evaluate", {
-                "expression": f"window.MomTV?.scrollBy?.({dy}) ?? window.scrollBy(0, {dy})",
+                "expression": f"(window.MomTV && typeof window.MomTV.scrollBy === 'function') ? window.MomTV.scrollBy({dy}) : window.scrollBy(0, {dy})",
                 "returnByValue": False
             }, wait_response=False)
-        user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(-dy), 0)
+        else:
+            user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(-dy), 0)
         response["dy"] = dy
     except Exception as e:
         response["error"] = str(e)
@@ -410,7 +439,7 @@ def _is_ws_token_valid(ws, data: dict = None) -> bool:
         if data and isinstance(data, dict):
             t1 = data.get("token", "")
             t2 = data.get("auth", "")
-            if hmac.compare_digest(str(t1), AUTH_TOKEN) or hmac.compare_digest(str(t2), AUTH_TOKEN):
+            if (t1 and hmac.compare_digest(str(t1), AUTH_TOKEN)) or (t2 and hmac.compare_digest(str(t2), AUTH_TOKEN)):
                 return True
     except Exception:
         pass
@@ -437,11 +466,13 @@ async def websocket_handler(ws):
     if _is_ws_token_valid(ws):
         setattr(ws, "_is_auth", True)
 
+    unauthorized_attempts = 0  # FIX: track failed auth attempts per connection
+
     # Immediate welcome handshake response
     welcome = {
         "type": "welcome",
         "status": "connected",
-        "server": "MOM TV Server 2.0 (CDP Enabled)",
+        "server": "MOM TV Server 2.1 (CDP Enabled)",
         "ip": LOCAL_IP,
         "http_port": HTTP_PORT,
         "ws_port": WS_PORT,
@@ -473,6 +504,15 @@ async def websocket_handler(ws):
                         await ws.send(json.dumps({"status": "ok", "type": "auth_success"}))
                         continue
                 else:
+                    # FIX: unauthenticated clients used to stay connected forever,
+                    # able to spam auth attempts indefinitely. Cap the attempts.
+                    unauthorized_attempts += 1
+                    if unauthorized_attempts >= MAX_UNAUTHORIZED_ATTEMPTS:
+                        try:
+                            await ws.close(1008, "Too many unauthorized attempts")
+                        except Exception:
+                            pass
+                        break
                     await ws.send(json.dumps({"status": "error", "message": "Unauthorized: valid token required"}))
                     continue
 

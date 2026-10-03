@@ -1,6 +1,11 @@
+"""
+core/logging_config.py — Project-wide structured logging
+"""
+
 import logging
 
 __all__ = ["setup_logging"]
+
 
 def setup_logging(level=logging.INFO):
     """Setup project-wide structured logging replacing prints."""

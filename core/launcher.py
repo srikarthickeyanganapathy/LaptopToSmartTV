@@ -28,7 +28,9 @@ def _strategy_ignored(resolved: str) -> bool:
 def _strategy_start_kiosk(resolved: str) -> bool:
     if not kiosk_supervisor.is_running:
         logger.info("🛡️ [Launcher] Starting Brave Kiosk Supervisor...")
-        kiosk_supervisor.start()
+        # FIX: pass the requested URL. Previously the kiosk booted into the
+        # launcher and silently dropped the app the user actually asked to open.
+        kiosk_supervisor.start(initial_url=resolved)
         park_cursor()
         return True
     return False
@@ -45,14 +47,17 @@ def _strategy_local_file(resolved: str) -> bool:
     if not (resolved.startswith("http://") or resolved.startswith("https://")):
         if resolved.startswith("file:///") or os.path.exists(resolved):
             logger.info(f"📂 Opening local target: {resolved}")
-            os.startfile(resolved)
+            if hasattr(os, "startfile"):
+                os.startfile(resolved)
             park_cursor()
             return True
     return False
 
 def _strategy_fallback(resolved: str) -> bool:
     if not kiosk_supervisor.is_running:
-        kiosk_supervisor.start()
+        # FIX: same as _strategy_start_kiosk — boot the kiosk INTO the requested
+        # target instead of the launcher.
+        kiosk_supervisor.start(initial_url=resolved)
     park_cursor()
     return True
 

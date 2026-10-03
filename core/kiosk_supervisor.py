@@ -58,7 +58,6 @@ class BraveKioskSupervisor:
                 if os.path.isfile(p):
                     return name, p
 
-        # TODO: Move these completely to core/config.py if not already present
         # 1. Primary path
         primary = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
         if os.path.isfile(primary):
@@ -124,7 +123,12 @@ class BraveKioskSupervisor:
 
     def _launch_process(self, initial_url: str | None = None, disable_gpu: bool = False):
         if not self.browser_path or not os.path.isfile(self.browser_path):
-            print(f"[-] [Kiosk Supervisor] Browser binary not found at: {self.browser_path}")
+            # FIX: previously this returned silently, and the watchdog then retried
+            # the launch every 2.5 seconds forever — spamming the log and never
+            # surfacing the actual problem. Missing browser is fatal: stop retrying.
+            print(f"[-] [Kiosk Supervisor] FATAL: No browser binary found (searched Brave/Chrome/Edge).")
+            print(f"[-] [Kiosk Supervisor] Install Brave, or add its path to BROWSER_CANDIDATES in core/config.py.")
+            self._should_run = False
             return
 
         target_url = initial_url or TV_URL

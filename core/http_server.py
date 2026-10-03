@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import json
+import html
 import urllib.parse
 import asyncio
 import logging
@@ -51,12 +52,27 @@ logger = logging.getLogger(__name__)
 START_TIME = time.time()
 _RATE_LIMITS = {}
 
+# PERF: hoisted lowercase allowlists (were rebuilt on every request).
+_ALLOWED_STATIC_FILES_LC = {f.lower() for f in ALLOWED_STATIC_FILES}
+_ALLOWED_STATIC_DIRS_LC = {d.lower() for d in ALLOWED_STATIC_DIRS}
+_MAX_POST_BODY = 2 * 1024 * 1024  # FIX: cap request bodies at 2 MB (was uncapped).
+
 
 def _get_main_loop():
     # Helper backward compat
     app_mod = sys.modules.get("app")
-    if app_mod and getattr(app_mod, "MAIN_LOOP", None):
-        return app_mod.MAIN_LOOP
+    loop = getattr(app_mod, "MAIN_LOOP", None) if app_mod else None
+    if loop and not loop.is_closed():
+        return loop
+    # FIX: consult the shared loop registry. Previously this helper ignored it and
+    # could end up with a fresh (never-run) loop, making CDP navigation from the
+    # HTTP API silently do nothing.
+    try:
+        loop = get_loop()
+        if loop and not loop.is_closed():
+            return loop
+    except Exception:
+        pass
     try:
         return asyncio.get_running_loop()
     except RuntimeError:
@@ -92,14 +108,14 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
         if token and hmac.compare_digest(token, AUTH_TOKEN):
             return True
 
-        # 4. Query param ?token=
+        # 2. Query param ?token=
         parsed = urllib.parse.urlparse(self.path)
         q_params = urllib.parse.parse_qs(parsed.query)
         token_q = q_params.get("token", [""])[0]
         if token_q and hmac.compare_digest(token_q.strip(), AUTH_TOKEN):
             return True
 
-        # 5. In JSON body
+        # 3. In JSON body
         if body_json and isinstance(body_json, dict):
             token_b = body_json.get("token")
             if token_b and hmac.compare_digest(str(token_b).strip(), AUTH_TOKEN):
@@ -149,9 +165,9 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
                 return None
 
             is_allowed = False
-            if len(path_segments) == 1 and path_segments[0].lower() in {f.lower() for f in ALLOWED_STATIC_FILES}:
+            if len(path_segments) == 1 and path_segments[0].lower() in _ALLOWED_STATIC_FILES_LC:
                 is_allowed = True
-            elif len(path_segments) > 1 and path_segments[0].lower() in ALLOWED_STATIC_DIRS:
+            elif len(path_segments) > 1 and path_segments[0].lower() in _ALLOWED_STATIC_DIRS_LC:
                 is_allowed = True
 
             if not is_allowed:
@@ -218,12 +234,31 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b'{"status": "error", "message": "Cross-origin request rejected"}')
                 return
 
-            content_len = int(self.headers.get("Content-Length", 0))
+            try:
+                content_len = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                content_len = 0
+            # FIX: cap the body — an uncapped read let a single request pin server memory.
+            content_len = max(0, min(content_len, _MAX_POST_BODY))
             post_data = self.rfile.read(content_len) if content_len > 0 else b"{}"
             try:
                 body_json = json.loads(post_data.decode("utf-8")) if post_data else {}
             except Exception:
                 body_json = {}
+            if not body_json:
+                # FIX: PWA share-target posts arrive as application/x-www-form-urlencoded,
+                # NOT JSON — parse them too so /api/search works when sharing from apps.
+                ctype = (self.headers.get("Content-Type") or "").lower()
+                if "application/x-www-form-urlencoded" in ctype:
+                    try:
+                        body_json = {
+                            k: (v[0] if len(v) == 1 else v)
+                            for k, v in urllib.parse.parse_qs(
+                                post_data.decode("utf-8"), keep_blank_values=True
+                            ).items()
+                        }
+                    except Exception:
+                        body_json = {}
 
             # Enforce authentication on all state-changing endpoints
             if not self._verify_token(body_json):
@@ -235,15 +270,18 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
             client_ip = self.client_address[0]
             now = time.time()
             if path in ("/api/launch", "/api/open", "/api/search", "/api/kiosk/close", "/api/kiosk_close", "/api/exit"):
-                if client_ip not in _RATE_LIMITS:
-                    _RATE_LIMITS[client_ip] = []
-                _RATE_LIMITS[client_ip] = [t for t in _RATE_LIMITS[client_ip] if now - t < 60]
-                if len(_RATE_LIMITS[client_ip]) >= 10:
+                # FIX: prune stale rate-limit buckets so _RATE_LIMITS can't grow forever.
+                if len(_RATE_LIMITS) > 512:
+                    for stale_ip in [ip for ip, ts in _RATE_LIMITS.items() if not ts or now - ts[-1] > 300]:
+                        _RATE_LIMITS.pop(stale_ip, None)
+                bucket = _RATE_LIMITS.setdefault(client_ip, [])
+                bucket[:] = [t for t in bucket if now - t < 60]
+                if len(bucket) >= 10:
                     self.send_response(429)
                     self.end_headers_with_cors("application/json; charset=utf-8")
                     self.wfile.write(b'{"status": "error", "message": "Too many requests"}')
                     return
-                _RATE_LIMITS[client_ip].append(now)
+                bucket.append(now)
 
             handlers = {
                 "/api/apps": self._post_apps,
@@ -292,7 +330,7 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
     def _post_launch(self, body_json, parsed):
         target = body_json.get("url") or body_json.get("app") or body_json.get("target", "")
-        resolved = APP_SHORTCUTS.get(target.lower(), target)
+        resolved = APP_SHORTCUTS.get(str(target).lower(), target)
 
         if not kiosk_supervisor.is_running:
             kiosk_supervisor.start(initial_url=resolved)
@@ -309,7 +347,9 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
         if loop and loop.is_running():
             future = asyncio.run_coroutine_threadsafe(cdp_bridge.navigate(resolved), loop)
             try:
-                success = future.result(timeout=6.0)
+                # FIX: 6s was shorter than navigate()'s own internal waits
+                # (4s connect + command timeouts), causing false fallbacks.
+                success = future.result(timeout=10.0)
             except Exception:
                 success = False
 
@@ -342,9 +382,22 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
     def _post_search(self, body_json, parsed):
         q_params = urllib.parse.parse_qs(parsed.query)
-        query = body_json.get("query") or body_json.get("q") or q_params.get("q", [""])[0] or q_params.get("query", [""])[0]
+        # FIX: also accept the fields the PWA share-target sends (text/title/url).
+        # Previously only query/q were read, so shared content was silently dropped.
+        query = (
+            body_json.get("query")
+            or body_json.get("q")
+            or body_json.get("text")
+            or body_json.get("title")
+            or q_params.get("q", [""])[0]
+            or q_params.get("query", [""])[0]
+        )
+        query = str(query or "").strip()
+        shared_url = str(body_json.get("url") or "").strip()
+        if not query and shared_url:
+            query = shared_url  # share-target: a bare link was shared
         destination = (body_json.get("destination") or q_params.get("destination", ["youtube"])[0] or "youtube").lower()
-        encoded = urllib.parse.quote_plus(str(query).strip())
+        encoded = urllib.parse.quote_plus(query)
 
         if destination in ("hotstar", "disney"):
             target_url = f"https://www.hotstar.com/in/explore?search_query={encoded}"
@@ -363,6 +416,24 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
             else:
                 launch_target(target_url)
             park_cursor()
+
+        # FIX: share-target requests are browser form POSTs — they expect an HTML
+        # page, not raw JSON. Detect form posts and reply with a friendly page.
+        ctype = (self.headers.get("Content-Type") or "").lower()
+        if "application/x-www-form-urlencoded" in ctype or "multipart/form-data" in ctype:
+            page = (
+                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Shared to MOM TV</title></head>"
+                "<body style=\"background:#0b0c10;color:#fff;font-family:system-ui;display:flex;"
+                "align-items:center;justify-content:center;height:100vh;margin:0\">"
+                "<div style='text-align:center'><h1>✅ Sent to TV</h1>"
+                f"<p style='color:#888'>{html.escape(query[:120])}</p></div></body></html>"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.end_headers_with_cors("text/html; charset=utf-8")
+            self.wfile.write(page)
+            return
 
         payload = {
             "status": "ok",
@@ -395,9 +466,10 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b'{"status": "error", "message": "Unauthorized: valid AUTH_TOKEN required"}')
                 return
 
+            # FIX: URL-decode the app id — ids with spaces/special chars never matched.
             app_id = ""
             if path.startswith("/api/apps/"):
-                app_id = path.split("/api/apps/")[1]
+                app_id = urllib.parse.unquote(path.split("/api/apps/", 1)[1])
             elif path == "/api/apps":
                 q_params = urllib.parse.parse_qs(parsed.query)
                 app_id = q_params.get("id", [""])[0] or q_params.get("app", [""])[0]
@@ -444,7 +516,7 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
         if path in ("/", "/remote", "/index.html"):
             q_params = urllib.parse.parse_qs(parsed.query)
             token_param = q_params.get("token", [""])[0]
-            set_cookie = bool(token_param and token_param == AUTH_TOKEN)
+            set_cookie = bool(token_param and hmac.compare_digest(token_param, AUTH_TOKEN))
             self.serve_file_or_fallback(
                 "index.html",
                 "text/html; charset=utf-8",
@@ -458,7 +530,7 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
         if path in ("/tv", "/tv.html"):
             q_params = urllib.parse.parse_qs(parsed.query)
             token_param = q_params.get("token", [""])[0]
-            set_cookie = bool(token_param and token_param == AUTH_TOKEN)
+            set_cookie = bool(token_param and hmac.compare_digest(token_param, AUTH_TOKEN))
             fallback_tv = (
                 b"<!DOCTYPE html><html><head><meta charset='UTF-8'>"
                 b"<title>MOM TV Launcher</title></head>"
@@ -478,11 +550,15 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
         # 3. PWA Manifest
         if path == "/manifest.json":
+            # FIX (SECURITY): never embed AUTH_TOKEN here. This endpoint is served
+            # WITHOUT authentication, so a token in start_url leaked it to any
+            # device on the LAN. The real token now reaches the client only via
+            # the pairing link / Set-Cookie on / and /tv.
             fallback_manifest = json.dumps(
                 {
                     "name": "MOM TV Remote",
                     "short_name": "MomTV",
-                    "start_url": f"/remote?token={AUTH_TOKEN}",
+                    "start_url": "/",
                     "display": "standalone",
                     "background_color": "#0b0c10",
                     "theme_color": "#0b0c10",
@@ -526,7 +602,7 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
                 "browser_path": kiosk_supervisor.browser_path,
                 "remote_url": f"http://{LOCAL_IP}:{HTTP_PORT}/remote?token={AUTH_TOKEN}",
                 "tv_url": f"http://{LOCAL_IP}:{HTTP_PORT}/tv?token={AUTH_TOKEN}",
-                "version": "2.0.0",
+                "version": "2.1.1",
             }
             body = json.dumps(payload, indent=2).encode("utf-8")
             self.send_response(200)
@@ -600,9 +676,9 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
 
         # Defense 2: Validate against allowlists
         is_allowed = False
-        if len(path_segments) == 1 and path_segments[0].lower() in {f.lower() for f in ALLOWED_STATIC_FILES}:
+        if len(path_segments) == 1 and path_segments[0].lower() in _ALLOWED_STATIC_FILES_LC:
             is_allowed = True
-        elif len(path_segments) > 1 and path_segments[0].lower() in ALLOWED_STATIC_DIRS:
+        elif len(path_segments) > 1 and path_segments[0].lower() in _ALLOWED_STATIC_DIRS_LC:
             is_allowed = True
 
         if not is_allowed:
@@ -616,8 +692,9 @@ class SmartTVHTTPRequestHandler(SimpleHTTPRequestHandler):
         norm_path = os.path.normpath(os.path.abspath(os.path.join(base_dir, clean_rel)))
 
         try:
+            # FIX: `except (ValueError, Exception)` — Exception already covers ValueError.
             is_safe = os.path.commonpath([norm_path, base_dir]).lower() == base_dir.lower()
-        except (ValueError, Exception):
+        except Exception:
             is_safe = False
 
         if not is_safe:

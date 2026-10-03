@@ -17,6 +17,7 @@ import urllib.request
 import urllib.error
 import http.client
 import threading
+import zlib
 from core.config import DEFAULT_APPS, CUSTOM_APPS_FILE, TV_URL
 
 __all__ = [
@@ -87,23 +88,37 @@ def load_all_apps() -> list[dict]:
             try:
                 with open(CUSTOM_APPS_FILE, "r", encoding="utf-8-sig") as f:
                     data = json.load(f)
-                    if isinstance(data, list):
-                        for item in data:
-                            if isinstance(item, dict) and item.get("url"):
-                                item_url = item["url"].rstrip("/").lower()
-                                item_id = (item.get("id") or item.get("app") or "").lower()
-                                if item_id in seen_ids or item_url in seen_urls:
-                                    continue
-                                apps.append(item)
-                                if item_id:
-                                    seen_ids.add(item_id)
-                                seen_urls.add(item_url)
-                    elif isinstance(data, dict):
-                        for k, v in data.items():
-                            k_lower = k.lower()
+                if isinstance(data, list):
+                    for item in data:
+                        # FIX: one malformed entry used to abort the entire read and
+                        # silently drop EVERY custom app. Each item is now guarded, and
+                        # all values are coerced to strings before .lower()/.rstrip().
+                        try:
+                            if not isinstance(item, dict):
+                                continue
+                            item_url = str(item.get("url") or "").strip()
+                            if not item_url:
+                                continue
+                            norm_url = item_url.rstrip("/").lower()
+                            item_id = str(item.get("id") or item.get("app") or "").strip().lower()
+                            if item_id in seen_ids or norm_url in seen_urls:
+                                continue
+                            apps.append(item)
+                            if item_id:
+                                seen_ids.add(item_id)
+                            seen_urls.add(norm_url)
+                        except Exception:
+                            continue
+                elif isinstance(data, dict):
+                    for k, v in data.items():
+                        try:
+                            k_lower = str(k).strip().lower()
                             if isinstance(v, str):
-                                v_url = v.rstrip("/").lower()
-                                if k_lower in seen_ids or v_url in seen_urls:
+                                v_url = v.strip()
+                                if not v_url:
+                                    continue
+                                v_norm = v_url.rstrip("/").lower()
+                                if k_lower in seen_ids or v_norm in seen_urls:
                                     continue
                                 apps.append({
                                     "id": k,
@@ -119,10 +134,13 @@ def load_all_apps() -> list[dict]:
                                     "custom": True,
                                 })
                                 seen_ids.add(k_lower)
-                                seen_urls.add(v_url)
-                            elif isinstance(v, dict) and v.get("url"):
-                                v_url = str(v["url"]).rstrip("/").lower()
-                                if k_lower in seen_ids or v_url in seen_urls:
+                                seen_urls.add(v_norm)
+                            elif isinstance(v, dict):
+                                v_url = str(v.get("url") or "").strip()
+                                if not v_url:
+                                    continue
+                                v_norm = v_url.rstrip("/").lower()
+                                if k_lower in seen_ids or v_norm in seen_urls:
                                     continue
                                 item_entry = dict(v)
                                 item_entry.setdefault("id", k)
@@ -131,10 +149,12 @@ def load_all_apps() -> list[dict]:
                                 item_entry.setdefault("custom", True)
                                 apps.append(item_entry)
                                 seen_ids.add(k_lower)
-                                seen_urls.add(v_url)
+                                seen_urls.add(v_norm)
+                        except Exception:
+                            continue
             except Exception as e:
                 print(f"[-] Error reading apps.json: {e}")
-        
+
         _rebuild_shortcuts_from(apps)
         return apps
 
@@ -159,7 +179,7 @@ def _levenshtein_lite(s1: str, s2: str) -> int:
 def save_custom_app(app_data: dict) -> dict:
     """Save a user-defined custom website app to apps.json with thread-safety and reserved key guards."""
     import colorsys
-    
+
     raw_url = str(app_data.get("url", "")).strip()
     if not raw_url:
         return {"status": "error", "message": "URL is required"}
@@ -185,8 +205,10 @@ def save_custom_app(app_data: dict) -> dict:
     accent = app_data.get("accent")
     if not accent or accent == "#00D4FF":
         domain = parsed_url.netloc.replace("www.", "")
-        hue = hash(domain) % 360
-        rgb = colorsys.hls_to_rgb(hue/360.0, 0.55, 0.8)
+        # FIX: hash() of a str is randomized per process (PYTHONHASHSEED), so the
+        # generated accent color changed on every server restart. CRC32 is stable.
+        hue = zlib.crc32(domain.encode("utf-8", "ignore")) % 360
+        rgb = colorsys.hls_to_rgb(hue / 360.0, 0.55, 0.8)
         accent = f"#{int(rgb[0]*255):02x}{int(rgb[1]*255):02x}{int(rgb[2]*255):02x}"
 
     new_app = {
@@ -203,7 +225,7 @@ def save_custom_app(app_data: dict) -> dict:
         "custom": True,
         "is_custom": True,
     }
-    
+
     if "lastLaunched" in app_data:
         new_app["lastLaunched"] = app_data["lastLaunched"]
     if "pinned" in app_data:
@@ -218,10 +240,19 @@ def save_custom_app(app_data: dict) -> dict:
                 with open(CUSTOM_APPS_FILE, "r", encoding="utf-8-sig") as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        custom_list = [x for x in data if x.get("id") != app_id and x.get("url") != raw_url]
+                        # FIX: normalize URLs (trailing slash + case) when de-duplicating,
+                        # matching load_all_apps()'s normalization — previously
+                        # "https://x.com" and "https://x.com/" both got saved.
+                        norm_new = raw_url.rstrip("/").lower()
+                        custom_list = [
+                            x for x in data
+                            if isinstance(x, dict)
+                            and str(x.get("id", "")).strip().lower() != app_id.lower()
+                            and str(x.get("url", "")).strip().rstrip("/").lower() != norm_new
+                        ]
                     elif isinstance(data, dict):
                         for k, v in data.items():
-                            if isinstance(v, str) and k != app_id and v != raw_url:
+                            if isinstance(v, str) and k != app_id and v.rstrip("/").lower() != raw_url.rstrip("/").lower():
                                 custom_list.append({"id": k, "name": k.capitalize(), "app": k, "url": v, "custom": True})
             except Exception as e:
                 print(f"[-] Warning reading apps.json during save: {e}")
@@ -452,6 +483,8 @@ class SafeHTTPHandler(urllib.request.HTTPHandler):
 
 class SafeHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, req):
+        # NOTE: must be overridden — the inherited https_open hardcodes
+        # http.client.HTTPSConnection and would bypass SafeHTTPSConnection entirely.
         return self.do_open(SafeHTTPSConnection, req)
 
 

@@ -46,6 +46,9 @@ if __name__ == "__main__":
 
     import subprocess
     try:
-        subprocess.run([sys.executable, "app.py"], cwd=BASE_DIR)
+        result = subprocess.run([sys.executable, "app.py"], cwd=BASE_DIR)
+        # FIX: propagate app.py's exit code (previously always exited 0, so
+        # supervisors/scripts could not detect a crashed server).
+        sys.exit(result.returncode)
     except KeyboardInterrupt:
         print("\n🛑 MOM TV Server stopped by user.")

@@ -3,7 +3,6 @@ core/win32_input.py — Low-Level Windows Input Simulation & Power Controls
 Responsibilities: Virtual keystroke injection, text typing via SendInput, cursor parking, and display standby.
 """
 
-import os
 import sys
 import ctypes
 from ctypes import wintypes
@@ -32,8 +31,24 @@ __all__ = [
     "handle_power",
 ]
 
-user32 = ctypes.windll.user32
-powrprof = getattr(ctypes.windll, "powrprof", None)
+IS_WINDOWS = sys.platform == "win32"
+
+
+class _Win32Stub:
+    """FIX: no-op stand-in so this module imports (and unit tests run) on non-Windows machines."""
+
+    def __getattr__(self, _name):
+        def _noop(*_args, **_kwargs):
+            return 0
+        return _noop
+
+
+if IS_WINDOWS:
+    user32 = ctypes.windll.user32
+    powrprof = getattr(ctypes.windll, "powrprof", None)
+else:
+    user32 = _Win32Stub()
+    powrprof = None
 
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
@@ -46,21 +61,60 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_WHEEL = 0x0800
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),  # ULONG_PTR
+    ]
+
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
         ("wVk", wintypes.WORD),
         ("wScan", wintypes.WORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.c_ulonglong),
+        ("dwExtraInfo", ctypes.c_size_t),  # ULONG_PTR
     ]
 
 
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+
 class INPUT(ctypes.Structure):
-    class _INPUT(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT)]
     _anonymous_ = ("_input",)
-    _fields_ = [("type", wintypes.DWORD), ("_input", _INPUT)]
+    _fields_ = [("type", wintypes.DWORD), ("_input", _INPUT_UNION)]
+
+
+# ============================================================================
+# FIX (CRITICAL): the union previously contained ONLY KEYBDINPUT, which made
+# ctypes.sizeof(INPUT) == 32 bytes on x64 instead of the 40 bytes Windows
+# requires. SendInput() validates cbSize and silently rejects the call when it
+# does not match — every OS-level key injection (volume, power hotkeys, text
+# typing, all VK fallbacks) was a complete no-op. Including MOUSEINPUT and
+# HARDWAREINPUT in the union restores the correct 40-byte (x64) / 28-byte (x86)
+# layout, so SendInput now actually delivers keystrokes.
+# ============================================================================
+if IS_WINDOWS:
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
+    # FIX: VkKeyScanW returns a SHORT (high byte = modifier flags, -1 = no mapping);
+    # without restype the value came back sign-extended garbage.
+    user32.VkKeyScanW.argtypes = [wintypes.UINT]
+    user32.VkKeyScanW.restype = ctypes.c_short
 
 
 def press_vk(vk_code: int):
@@ -129,10 +183,14 @@ def send_unicode_text(text: str):
         # Note: This fallback only handles Shift modifiers, not AltGr/Ctrl+Alt combos.
         for char in text:
             vk = user32.VkKeyScanW(ord(char))
+            if vk == -1:
+                # FIX: -1 means "this keyboard layout cannot produce this char" —
+                # pressing VK 0xFF (the old behavior) injected a garbage key.
+                continue
             vk_code = vk & 0xFF
             shift = bool((vk >> 8) & 1)
             if shift:
-                combo([0x10, vk_code]) # Use combo for shift
+                combo([0x10, vk_code])  # Use combo for shift
             else:
                 press_vk(vk_code)
 

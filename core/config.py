@@ -41,18 +41,24 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Dynamic Session Authentication Token (Protects LAN & Drive-By attacks)
 _token_file = os.path.join(BASE_DIR, ".token")
-AUTH_TOKEN = os.environ.get("MOMTV_TOKEN")
+
+# FIX: previously an empty/corrupt .token file produced AUTH_TOKEN == "" —
+# compare_token() rejects empty tokens, so the whole system locked out
+# permanently. Now an empty/missing token is (re)generated.
+AUTH_TOKEN = os.environ.get("MOMTV_TOKEN") or ""
 if not AUTH_TOKEN:
     try:
-        with open(_token_file, "r") as f:
+        with open(_token_file, "r", encoding="utf-8") as f:
             AUTH_TOKEN = f.read().strip()
-    except FileNotFoundError:
-        AUTH_TOKEN = secrets.token_hex(16)
-        try:
-            with open(_token_file, "w") as f:
-                f.write(AUTH_TOKEN)
-        except Exception:
-            pass
+    except OSError:
+        AUTH_TOKEN = ""
+if not AUTH_TOKEN:
+    AUTH_TOKEN = secrets.token_hex(16)
+    try:
+        with open(_token_file, "w", encoding="utf-8") as f:
+            f.write(AUTH_TOKEN)
+    except OSError:
+        pass
 
 BRAVE_PROFILE_DIR = os.path.join(BASE_DIR, ".brave_tv_profile")
 TV_URL = f"http://localhost:{HTTP_PORT}/tv?token={AUTH_TOKEN}"
